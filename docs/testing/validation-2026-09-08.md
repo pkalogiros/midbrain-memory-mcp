@@ -1,82 +1,83 @@
 # Multi-client harness validation — 2026-09-08
 
-This is a review checkpoint, not release sign-off. The full required matrix
-finished with **93 PASS, 27 FAIL, and 1 BLOCKED**, with clean real-home isolation.
-Its frozen inputs and failures are retained. Focused follow-ups validate specific
-fixes; they do not make the original matrix green.
+**Focused validation passed; the latest required matrix was interrupted by an
+Anthropic billing error. There is no complete passing release matrix yet.**
 
-## Review changes
+## Current changes
 
-- `f84c5f6`: synchronous Claude Stop capture and migration. Radu's release review is pending.
-- `5b1f1fe`: one-layer NanoClaw transport-envelope decoding. Radu's release review is pending.
-- `9479c65`: the harness changes, including NanoClaw's documented formatting-retry exception.
-- Follow-up harness fixes: inspect the installed baseline with its own adapter;
-  install Hermes's MCP extra and read its current-turn session exports; retain
-  OpenCode's native tool evidence and complete MCP output files; isolate NanoClaw
-  agent files from host projects; wait for both capture roles in marker checks;
-  block unverified API readback and warmed-home cold-start claims.
+- `477bd79`: clarify MidBrain-before-local-memory ordering and complete retrieval
+  IDs. Migrate only recognized generated instruction blocks; preserve custom rules.
+- `debc9c5`: retain NanoClaw's installer-populated npm cache across container wakes,
+  explicitly clear npx resolution during upgrades, run Claude's cold first turn in
+  a separate fresh home, and verify native Codex hook approval before/after `/hooks`.
+- `03b6271`: drain pending OpenCode capture work on native plugin shutdown, bounded
+  to 30 seconds. Ordinary chat remains asynchronous. This fixes the observed POST
+  that started but did not finish before CLI exit.
+- `07ffe53`: retain native provider-error evidence and report it as BLOCKED. A
+  synthetic billing-error message must not count as a successful assistant turn.
 
-These follow-ups add no production dependencies. Every observed native NanoClaw
-reply still requires exactly one capture. The adapter retains raw transcripts;
-the product hook decodes recognized user envelopes.
+Earlier product changes remain separate: `f84c5f6` waits for Claude's native Stop
+capture and migrates owned asynchronous hooks; `5b1f1fe` decodes recognized NanoClaw
+user transport envelopes once. The adapter retains raw transcripts. NanoClaw's
+formatting-retry exception requires exactly one capture per native assistant reply.
+No production dependencies were added.
 
 ## Evidence
 
-Reports are retained under `<run-root>/runs/<run-id>/report.md`; private run homes
-are not committed to this repository.
+Reports live under `<run-root>/runs/<run-id>/report.md`. Private run homes and raw
+transcripts are not committed to this repository.
 
 | Run | Source | Coverage | Result |
 |---|---|---|---|
-| `20260908-093157-c670` | `9479c65` | Full `--required` registry/upgrade matrix | 93 PASS, 27 FAIL, 1 BLOCKED; isolation clean |
-| `20260908-101835-f1f3` | `0c854cb` | Hermes upgrade, fresh-session recall, markers, rule compliance | 7 PASS; isolation clean |
-| `20260908-110034-ea0b` | `fcf1047` | Claude ↔ NanoClaw recall with separate agent workspaces | 10 PASS; isolation clean |
+| `20260908-093157-c670` | `9479c65` | Original full required registry/upgrade matrix | 93 PASS, 27 FAIL, 1 BLOCKED; isolation clean |
+| `20260908-101835-f1f3` | `0c854cb` | Hermes upgrade, recall, markers and compliance | 7 PASS; isolation clean |
+| `20260908-110034-ea0b` | `fcf1047` | Claude ↔ NanoClaw recall with separate workspaces | 10 PASS; isolation clean |
+| `20260908-114400-6a43` | `22fac5c` | Fresh reproduction of Codex's marker-capture failure | 4 PASS; isolation clean |
+| `20260908-115033-5182` | `debc9c5` | Four-client markers, continuity, rules and special cases | 32 PASS, 1 FAIL; isolation clean |
+| `20260908-121346-7c12` | `03b6271` | Real OpenCode plugin-only capture and exact-anchor recall | 4 PASS; isolation clean |
+| `20260908-121539-de44` | `03b6271` | New full required registry/upgrade matrix | Interrupted: provider billing; isolation clean |
 
-The retained Codex → OpenCode case also passes six parser/scoring checks under
-`f3b21ae`, using its original native stream and the complete MCP response file.
-This recheck is stored separately in the required run's `opencode-parser-recheck/`;
-it does not replace the original matrix result.
+The sole failure in `115033-5182` was OpenCode's missing assistant capture in the
+plugin-only case. The subsequent shutdown fix passed `121346-7c12`. The earlier
+Codex marker failure did not recur in either focused run; no speculative Codex
+capture change was made. All four focused clients passed fresh-session recall and
+strict memory-first/exact-anchor checks. All NanoClaw lifecycle cases passed.
 
-The local API became unhealthy during the required run. A separate probe also
-timed out. PostgreSQL, the proxy, and LocalStack remained healthy; restarting
-only `memory-api` restored `/health`. The required run's
-`infrastructure-events.json` records this intervention. Outage-affected missing
-capture or recall evidence cannot establish a client regression.
+The focused Codex approval case observed zero capture before approval, then one
+user and one assistant capture in a new process without the bypass. The native
+UI showed all three MidBrain hooks active after individual approval; its terminal
+evidence is retained in `evidence/codex/s10-client-specific/approval-ui.txt`.
+Claude's cold-first-turn check passed in a separate home and npm cache.
 
-The baseline-inspection fix was verified independently with the published Claude
-installation: its own adapter reports fresh, while the newer candidate adapter
-correctly reports the old asynchronous hooks stale.
+The latest required attempt stopped during NanoClaw post-upgrade capture. Its
+native transcript identifies `billing_error`, HTTP 400, `isApiErrorMessage: true`,
+and “Credit balance is too low.” It retains `interruption.json` and an explicit
+interruption report, not a complete parity report. Its 27 API health probes all
+succeeded; none exceeded five seconds. No service restart occurred during that
+attempt. The preceding focused run recorded three brief five-second health-probe
+timeouts followed by recovery; these remain in its evidence.
 
-`VITEST_MAX_WORKERS=4 npm run check` passed: 1,283 tests, two client-inapplicable
-skips, and 224 additional copied-topology tests. Four workers avoid contention
-with live client runs without changing any test assertions or timeouts.
+Original failed reports are unchanged. Earlier parser rechecks and focused passes
+do not replace a complete required matrix on the corrected implementation.
 
-## Findings still requiring evidence
+## Verification and cleanup
 
-- Codex's literal-marker case missed the assistant capture. NanoClaw's marker
-  case missed both capture roles; its native hook reported a missing `ajv`
-  dependency and MCP startup timed out. NanoClaw also missed state-change rows.
-- Claude performed a local read before memory recall in fresh-session testing.
-  OpenCode's plugin-only case recovered the value but split the required exact
-  retrieval anchor. Strict rule checks remain failures.
-- Claude's upgrade failure was the previous release's missing assistant capture;
-  candidate capture and migration passed. The installed-baseline inspection and
-  Hermes/OpenCode evidence defects have separate follow-up verification above.
-- The API outage prevents treating all missing rows as client regressions. A
-  healthy-service rerun must distinguish infrastructure failures from client bugs.
+Final `VITEST_MAX_WORKERS=4 npm run check` passed: 54 files, 1,288 tests, two
+client-inapplicable skips, and 224 additional copied-topology tests. Regression
+coverage includes pending capture at shutdown, the shutdown deadline, generated
+rule migration, cache isolation, and native provider-error classification.
 
-All five clients passed initial capture/metadata checks and clean no-match
-behavior. All 20 ordered cross-client pairs ran: 15 recalls passed and five failed.
-No failed original result was overwritten by a parser recheck or later run.
+A scan of 232 new report/evidence text files found no configured credentials.
+Private run homes retain credentials and must remain private. No run-owned Docker
+containers remained. The four API services started for validation were restored
+to their original stopped state. Nothing was pushed or published externally.
 
-The three completed runs' 672 report/evidence text files contained no configured
-provider/test credentials in the scan. Private run homes retain credentials and
-are intentionally excluded from committed evidence.
+## Resume the required matrix
 
-## Reproduce
-
-Configure dedicated test/provider credentials in `harness/.env` and a durable
-`MIDBRAIN_HARNESS_ROOT`. The original run used macOS arm64, Node 24.3.0,
-Claude Code 2.1.258, Codex 0.150.1, and the manifest's pinned NanoClaw image/source.
+Fund the configured Anthropic key, or configure a funded key in `harness/.env`.
+Start the local test API and its dependencies if using the local stack. Keep the
+same dedicated test credentials, durable run root, and pinned client configuration.
+Run from a terminal so native Codex approval can be completed:
 
 ```sh
 MIDBRAIN_HARNESS_CLAUDE_MODEL='claude-opus-5[1m]' \
@@ -86,13 +87,15 @@ MIDBRAIN_HARNESS_OPENCODE_MODEL=anthropic/claude-sonnet-4-6 \
 MIDBRAIN_HARNESS_HERMES_VERSION=0.19.0 \
 MIDBRAIN_HARNESS_HERMES_MODEL=claude-sonnet-4-5 \
 MIDBRAIN_HARNESS_NANOCLAW_MODEL=claude-sonnet-4-5 \
-node harness/run.mjs run --mode registry --upgrade --required
+node harness/run.mjs run --mode registry --upgrade --required --interactive
 ```
 
-## Release boundaries
+These runs used macOS arm64, Node 24.3.0, Claude Code 2.1.258, Codex 0.150.1,
+and the manifest's pinned NanoClaw source/image. NanoClaw deployment configuration
+must preserve the npm cache as described in the harness README. OpenCode shutdown
+draining requires a client implementing the plugin `dispose` hook (verified on
+1.18.29).
 
-The corrected harness still needs a required run against a healthy API. Codex
-persisted hook approval requires interactive before/after evidence, and Claude's
-cold-first-turn case requires a separate clean-home run without the upgrade
-prelude. Radu's review of the two product commits remains required. CI/release
-integration and broader OS validation are separate work.
+Release sign-off still needs a complete required run and Radu's review of the
+product changes. CI/release integration and broader OS validation remain separate
+work.
