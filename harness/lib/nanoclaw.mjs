@@ -17,7 +17,7 @@ export const NANOCLAW_REPO = 'https://github.com/nanocoai/nanoclaw.git';
 export const CAPTURE_CWD = '/workspace/agent';
 // Dev packages live in a temporary install context so product self-repair does
 // not replace the frozen dev hooks with registry hooks. Registry mode uses npx.
-const PACKAGE = '/tmp/midbrain/node_modules/midbrain-memory-mcp';
+const PACKAGE = path.join('/tmp/midbrain/node_modules', "midbrain-memory-mcp");
 const STATE = '/home/node/.claude/.midbrain';
 
 export function dockerEnv(source = process.env) {

@@ -79,9 +79,14 @@ export async function installCandidate(ctx, candidate, { cwd, extraArgs = [], la
 }
 
 /** Ask the product's own adapters whether a client install is complete and fresh. */
-export async function inspectInstall(ctx, candidate, clientId) {
+export async function inspectInstall(ctx, candidate, clientId, { installed = false } = {}) {
   const script = path.join(HARNESS_DIR, 'lib', 'inspect-install.mjs');
-  const r = await spawnCapture(process.execPath, [script, candidate.repoRoot, clientId], {
+  // Before an upgrade, freshness belongs to the installed release's adapter.
+  const command = installed ? 'npx' : process.execPath;
+  const args = installed
+    ? ['-y', '--package', `${candidate.name}@latest`, '--', process.execPath, script, '--installed', clientId]
+    : [script, candidate.repoRoot, clientId];
+  const r = await spawnCapture(command, args, {
     cwd: ctx.dirs.run,
     env: childEnv(ctx),
     timeoutMs: 30000,

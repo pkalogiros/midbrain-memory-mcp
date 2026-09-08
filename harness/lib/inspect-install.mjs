@@ -3,8 +3,14 @@
 // harness never re-implements config parsing. Prints one JSON object.
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { whichSync } from './proc.mjs';
 
-const repo = process.argv[2];
+let repo = process.argv[2];
+if (repo === '--installed') {
+  const bin = whichSync("midbrain-memory-mcp");
+  if (!bin) throw new Error('Installed package binary not found in the npx environment');
+  repo = path.resolve(path.dirname(bin), '..', "midbrain-memory-mcp");
+}
 const id = process.argv[3];
 const registry = await import(pathToFileURL(path.join(repo, 'shared', 'clients', 'registry.mjs')).href);
 const shim = await import(pathToFileURL(path.join(repo, 'shared', 'clients', 'shim.mjs')).href);

@@ -13,13 +13,16 @@ const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 3
 const PKG = 'hermes-agent';
 const SESSION_RE = /\b(session[_ -]?id|session)\b[^A-Za-z0-9_-]{0,6}([A-Za-z0-9_-]{8,})/i;
 
-function parseSessionExport(jsonl) {
+export function parseSessionExport(jsonl, prompt) {
   const toolCalls = [];
   let finalText = '';
-  for (const line of jsonl.split('\n')) {
-    if (!line.trim()) continue;
-    let row;
-    try { row = JSON.parse(line); } catch { continue; }
+  const messages = jsonl.split('\n').flatMap(line => {
+    try { const row = JSON.parse(line); return Array.isArray(row.messages) ? row.messages : [row]; } catch { return []; }
+  });
+  // Resumed exports include earlier turns. They cannot prove this turn recalled anything.
+  const start = prompt === undefined ? 0 : messages.findLastIndex(row => row.role === 'user' && row.content === prompt);
+  if (start < 0) return { toolCalls, finalText };
+  for (const row of messages.slice(start)) {
     const role = row.role || row.type;
     if (role === 'assistant' || role === 'ai') {
       const calls = row.tool_calls || row.toolCalls || [];
@@ -32,7 +35,12 @@ function parseSessionExport(jsonl) {
       if (typeof row.content === 'string' && row.content.trim()) finalText = row.content;
     } else if (role === 'tool') {
       const target = toolCalls.find((t) => t.id && t.id === (row.tool_call_id || row.toolCallId));
-      if (target) { target.result = typeof row.content === 'string' ? row.content : JSON.stringify(row.content ?? ''); target.ok = true; }
+      if (target) {
+        target.result = typeof row.content === 'string' ? row.content : JSON.stringify(row.content ?? '');
+        let payload = row.content;
+        try { payload = JSON.parse(target.result); } catch { /* Hermes also returns plain text errors. */ }
+        target.ok = !(row.is_error || row.isError || payload?.error || payload?.isError || payload?.success === false || /^(?:Error:|Tool '.+' does not exist\.)/.test(target.result.trim()));
+      }
     }
   }
   return { toolCalls, finalText };
@@ -55,7 +63,7 @@ export default {
     'A running gateway must be restarted after setup (not applicable to one-shot chat runs).',
     'No transcript file exists; tool-call evidence comes from `hermes sessions export` and the hook log.',
   ],
-  get options() { return { provider: process.env.MIDBRAIN_HARNESS_HERMES_PROVIDER || 'anthropic', model: process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5' }; },
+  get options() { return { provider: process.env.MIDBRAIN_HARNESS_HERMES_PROVIDER || 'anthropic', model: process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5', mcpDiscoveryTimeout: 30 }; },
   specific: ['hook-acceptance'],
 
   clientEnv(ctx, { acceptHooks = true } = {}) {
@@ -85,9 +93,12 @@ export default {
     const dir = path.join(ctx.dirs.home, '.hermes');
     mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'config.yaml');
-    if (existsSync(file) && /^model:/m.test(readFileSync(file, 'utf8'))) return file;
     const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
-    writeFileSync(file, `${existing.trimEnd()}${existing ? '\n' : ''}model:\n  provider: ${this.options.provider}\n  default: ${this.options.model}\n`);
+    let content = existing;
+    if (!/^model:/m.test(content)) content = `${content.trimEnd()}${content ? '\n' : ''}model:\n  provider: ${this.options.provider}\n  default: ${this.options.model}\n`;
+    // Hermes defaults to 1.5 s; a cold npx install needs a bounded discovery wait.
+    if (!/^mcp_discovery_timeout:/m.test(content)) content = `${content.trimEnd()}\nmcp_discovery_timeout: ${this.options.mcpDiscoveryTimeout}\n`;
+    if (content !== existing) writeFileSync(file, content);
     return file;
   },
 
@@ -140,9 +151,9 @@ export default {
       const exp = await spawnCapture('hermes', ['sessions', 'export', '--format', 'jsonl', '--session-id', turn.sessionId, '--yes', '--no-redact', out], { cwd: project, env, timeoutMs: 120000 });
       if (exp.code === 0 && existsSync(out)) {
         turn.exportPath = out;
-        const parsed = parseSessionExport(readFileSync(out, 'utf8'));
+        const parsed = parseSessionExport(readFileSync(out, 'utf8'), prompt);
         turn.toolCalls = parsed.toolCalls;
-        if (!turn.finalText && parsed.finalText) turn.finalText = parsed.finalText;
+        if (parsed.finalText) turn.finalText = parsed.finalText;
       } else {
         turn.exportError = `${exp.stderr}`.trim().slice(-300);
       }

@@ -245,12 +245,12 @@ async function run(flags) {
       log(`${m.id}: ${st.blockedReason}`);
       continue;
     }
-    const insp = await inspectInstall(ctx, candidate, m.id);
+    const insp = await inspectInstall(ctx, candidate, m.id, { installed: upgrade });
     st.configShape = configShapeSnapshot(ctx, m);
     const missing = Object.entries(st.configShape).filter(([, v]) => v === 'ABSENT').map(([k]) => k);
     cells.push(cell({
       row: 'Clean install', scenario: 'install', client: m,
-      expected: 'installer exits 0; the product adapter reports the client installed and fresh; every declared config surface exists',
+      expected: `${upgrade ? 'Previous release' : 'Candidate'} installer exits 0; its product adapter reports the client installed and fresh; every declared config surface exists`,
       evidence: ['evidence/_install/install-global.stdout.txt', 'evidence/_install/install-global.stderr.txt'],
       notes: `adapter inspect: ${JSON.stringify(insp).slice(0, 500)}`,
       checks: [

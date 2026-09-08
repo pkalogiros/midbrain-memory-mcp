@@ -161,6 +161,11 @@ export default {
 | Hermes | run-local `uv tool install hermes-agent`; `hermes chat -q <prompt> -Q --provider anthropic -m <model> [--resume <id>]` with `HERMES_ACCEPT_HOOKS=1`; `hermes hooks list` shows consent state, `hermes mcp list` the server | session id from `-Q` output or `hermes sessions list` | `hermes sessions export --format jsonl`; `shell-hooks-allowlist.json`; `midbrain-hermes.log` |
 | NanoClaw | Docker required; group container with `.claude-shared/settings.json` merge (driver: phase 3) | Stop payload `session_id` | transcript under `/home/node/.claude/projects`, spool/receipt files |
 
+Hermes's run-owned config sets `mcp_discovery_timeout: 30` so cold npx startup
+can finish before its first tool snapshot (Hermes 0.19 defaults to 1.5 seconds).
+The export reader accepts nested session envelopes and flat JSONL messages;
+only the current turn's successful tool calls count as recall evidence.
+
 All children receive a **scrubbed env**: `HOME`/`USERPROFILE` → run home; `TMPDIR`/`TEMP`/`TMP`
 → `<run>/tmp`; `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME`, `npm_config_cache` inside the
 run home; `MIDBRAIN_LOG_DIR=<run>/logs`, `MIDBRAIN_LOG_LEVEL=debug`; **deleted**: `CI`,

@@ -15,10 +15,12 @@ export default {
     const expected = 'The literal marker-like line survives intact in the answer and in the captured user row (unsigned marker-like text is neither scrubbed nor acted on).';
     const since = sinceNow();
     const t = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'turn-1' });
-    const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
+    const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1, minAssistant: 1 });
+    const readbackPath = t.jsonPath.replace(/\.json$/, '.readback.json');
+    ctx.writeJson(readbackPath, rb);
     const userRow = rb.user[0];
     const userText = userRow ? rowText(userRow) : '';
-    return [cell({ row: 'Marker and prompt robustness', scenario: this.id, client, prompt, expected, evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath)],
+    return [cell({ row: 'Marker and prompt robustness', scenario: this.id, client, prompt, expected, evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath), relEvidence(ctx, readbackPath)],
       notes: `read-back rows=${rb.rows.length} in ${rb.elapsedMs} ms`,
       checks: [
         ...turnChecks(t),
