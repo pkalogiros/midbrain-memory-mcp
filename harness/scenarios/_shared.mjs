@@ -38,6 +38,7 @@ export async function readback(ctx, api, marker, { sinceIso, minUser = 1, minAss
     intervalMs: ctx.options.pollIntervalMs,
     settleMs: ctx.options.captureSettleMs ?? 5000,
   });
+  if (res.lastError) throw new BlockedError(`MidBrain API readback failed: ${res.lastError}`);
   return splitRows(res, marker);
 }
 

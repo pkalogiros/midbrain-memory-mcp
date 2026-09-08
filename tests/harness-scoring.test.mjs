@@ -6,6 +6,11 @@ import { HarnessApi } from '../harness/lib/api.mjs';
 const turn = (result, ok = true) => ({ finalText: 'VALUE-secret', toolCalls: [{ name: 'midbrain__memory_search', input: { query: 'TASK' }, result, ok }] });
 const passed = checks => checks.every(c => c.ok);
 
+it('reports an unavailable readback API as blocked', async () => {
+  const api = { waitForRows: async () => ({ rows: [], lastError: 'service unavailable' }) };
+  await expect(readback({ options: {} }, api, 'marker', {})).rejects.toMatchObject({ blocked: true, message: expect.stringContaining('service unavailable') });
+});
+
 it('does not label post-upgrade capture as a cold first turn', async () => {
   const { default: scenario } = await import('../harness/scenarios/s10-client-specific.mjs');
   const client = { id: 'claude', specific: ['cold-first-turn'] };
