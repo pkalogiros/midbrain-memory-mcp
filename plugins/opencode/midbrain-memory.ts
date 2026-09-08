@@ -16,7 +16,7 @@
  * Safety:
  * - Exactly 1 API POST per message (no backlog dumps, no history scans)
  * - Directory-based instance filtering (only matching instance processes)
- * - Fire-and-forget: never blocks chat on API response
+ * - Chat capture is asynchronous; shutdown waits up to 30 s for pending work
  * - Opt-in PK injection: silent fallthrough on any error or timeout
  */
 
@@ -91,8 +91,19 @@ export const MidBrainMemoryPlugin: Plugin = async ({ client, directory }) => {
   }
 
   const storedMessages = new Set<string>();
+  const pending = new Set<Promise<unknown>>();
+  function track<T>(work: Promise<T>): Promise<T> {
+    pending.add(work);
+    void work.then(() => pending.delete(work), () => pending.delete(work));
+    return work;
+  }
 
   return {
+    // OpenCode awaits dispose, but does not await asynchronous event callbacks.
+    dispose: async () => {
+      try { await withTimeout(Promise.allSettled([...pending]), 30000); }
+      catch { log.warn("SHUTDOWN: capture still pending after 30 s"); }
+    },
     // --- User messages: captured directly from hook (parts are inline) ---
     "chat.message": async (input, output) => {
       const msg = output.message as Record<string, unknown>;
@@ -111,7 +122,7 @@ export const MidBrainMemoryPlugin: Plugin = async ({ client, directory }) => {
 
       log.info(`USER: id=${messageID} len=${text.length}`);
       storedMessages.add(messageID);
-      api.storeEpisodic(text, "user", log, buildCaptureMetadata({ client: "opencode", cwd: directory, sessionId: sessionID }));
+      track(api.storeEpisodic(text, "user", log, buildCaptureMetadata({ client: "opencode", cwd: directory, sessionId: sessionID })));
 
       if (!isPkInjectionEnabled()) return;
 
@@ -146,7 +157,7 @@ export const MidBrainMemoryPlugin: Plugin = async ({ client, directory }) => {
     },
 
     // --- Assistant messages: captured when message.updated shows completion ---
-    event: async ({ event }) => {
+    event: ({ event }) => track((async () => {
       if (event.type !== "message.updated") return;
 
       const info = (event as any).properties?.info;
@@ -198,12 +209,12 @@ export const MidBrainMemoryPlugin: Plugin = async ({ client, directory }) => {
         if (!safeText) return;
 
         log.info(`ASSISTANT: storing id=${msgID} len=${safeText.length}`);
-        api.storeEpisodic(safeText, "assistant", log, buildCaptureMetadata({ client: "opencode", cwd: directory, sessionId: sessionID }));
+        await api.storeEpisodic(safeText, "assistant", log, buildCaptureMetadata({ client: "opencode", cwd: directory, sessionId: sessionID }));
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         log.error(`ASSISTANT ERROR: ${errMsg}`);
       }
-    },
+    })()),
   };
 };
 

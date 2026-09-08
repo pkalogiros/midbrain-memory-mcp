@@ -70,7 +70,9 @@ OpenCode / Claude Code / Codex session
 API and returns scored results as formatted text.
 
 **Capture**: Companion hooks POST conversation events to the episodic
-endpoint. OpenCode submits capture without awaiting the API response. Claude
+endpoint. OpenCode submits capture without awaiting the API response during chat;
+on clients supporting the plugin shutdown hook, it waits up to 30 seconds for
+pending capture before exit. Claude
 Code and Codex hooks complete capture and any required stdout before their
 throttled self-update check; that check may delay hook exit by up to
 `UPDATE_FETCH_TIMEOUT_MS`. Capture and update failures are non-fatal. OpenCode

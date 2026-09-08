@@ -309,6 +309,57 @@ describe("OpenCode plugin PK delivery helpers", () => {
     expect(new URL(searchUrl).searchParams.getAll("exclude_ids")).toEqual(["42"]);
   });
 
+  it("waits at shutdown for in-flight user capture, assistant lookup, and assistant capture", async () => {
+    const { MidBrainMemoryPlugin } = await import(pathToFileURL(PLUGIN_PATH).href);
+    let finishUser, finishAssistant, finishLookup;
+    fetchSpy.mockImplementation((_url, options) => new Promise(resolve => {
+      const finish = () => resolve({ ok: true, status: 201 });
+      if (JSON.parse(options.body).role === "user") finishUser = finish;
+      else finishAssistant = finish;
+    }));
+    const client = { session: { message: () => new Promise(resolve => { finishLookup = resolve; }) } };
+    const hooks = await MidBrainMemoryPlugin({ client, directory: "/repo" });
+    await hooks["chat.message"]({ sessionID: "s1" }, { message: { id: "u1" }, parts: [{ type: "text", text: "hello" }] });
+    const capture = hooks.event({ event: { type: "message.updated", properties: { info: {
+      id: "a1", role: "assistant", sessionID: "s1", time: { completed: 1 }, path: { cwd: "/repo" },
+    } } } });
+    let disposed = false;
+    const disposal = hooks.dispose().then(() => { disposed = true; });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    finishLookup({ data: { parts: [{ type: "text", text: "reply" }] } });
+    await vi.waitFor(() => expect(finishAssistant).toBeTypeOf("function"));
+    finishUser();
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    finishAssistant();
+    await Promise.all([capture, disposal]);
+    expect(disposed).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds shutdown waiting when a capture request stalls", async () => {
+    const { MidBrainMemoryPlugin } = await import(pathToFileURL(PLUGIN_PATH).href);
+    const hooks = await MidBrainMemoryPlugin({ client: {}, directory: "/repo" });
+    let finish;
+    fetchSpy.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await hooks["chat.message"]({ sessionID: "s1" }, { message: { id: "u1" }, parts: [{ type: "text", text: "hello" }] });
+    vi.useFakeTimers();
+    try {
+      let disposed = false;
+      const disposal = hooks.dispose().then(() => { disposed = true; });
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(disposed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await disposal;
+      expect(disposed).toBe(true);
+    } finally {
+      finish({ ok: true, status: 201 });
+      await hooks.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("scrubs injected PK echoes before storing assistant messages", async () => {
     const { MidBrainMemoryPlugin } = await import(pathToFileURL(PLUGIN_PATH).href);
     const block = formatPkContext([{ id: 13, title: "Echo Risk", content: "do not store me" }]);
