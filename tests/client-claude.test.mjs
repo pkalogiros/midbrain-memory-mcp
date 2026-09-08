@@ -323,7 +323,7 @@ describe("Claude.installGlobal", () => {
     expect(userHook.timeout).toBe(30);
     expect(stopHook.timeout).toBe(30);
     expect(userHook.async).not.toBe(true);
-    expect(stopHook.async).toBe(true);
+    expect(stopHook.async).not.toBe(true);
   });
 
   it("installGlobal writes the canonical claude-hook shim 0755", async () => {

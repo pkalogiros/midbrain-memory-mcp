@@ -200,7 +200,7 @@ Claude Code:
 
 - `plugins/claude-code/*.mjs` run in Node 20.
 - Installer-written hooks call the stable `~/.midbrain/bin/claude-hook` shim
-  (30s timeout, `Stop` async), not package-cache or checkout script paths. The
+  (30s timeout, synchronous `Stop` so one-shot clients wait for capture), not package-cache or checkout script paths. The
   shim resolves `npx -y midbrain-memory-mcp@latest hook claude <role>`.
 - `common.mjs` owns `createApi()`, the leveled `log` logger, and stdin parsing.
 - Opener recovery (issue #52): on a cold NanoClaw wake the opening message's

@@ -50,6 +50,18 @@ describe.each(CLIENTS)("$id — shim freshness (AC-11)", ({ id, make, configFile
     expect(await client.isFresh()).toBe(true);
   });
 
+  it.skipIf(id !== "claude")("repairs legacy asynchronous Stop hooks to synchronous capture", async () => {
+    const file = configFile(env.paths);
+    const config = JSON.parse(await fs.readFile(file, "utf8"));
+    config.hooks.Stop[0].hooks[0].async = true;
+    await fs.writeFile(file, JSON.stringify(config));
+    expect(await client.isFresh()).toBe(false);
+    await client.repairHooks();
+    const repaired = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(repaired.hooks.Stop[0].hooks[0].async).not.toBe(true);
+    expect(await client.isFresh()).toBe(true);
+  });
+
   it("B14: unmarked stale shim body behind canonical config is stale and repaired", async () => {
     const shim = stableShimPath(id);
     await fs.writeFile(shim, staleBody(id), "utf8");

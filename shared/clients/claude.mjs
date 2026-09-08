@@ -83,7 +83,7 @@ function buildHookCommand(role) {
 
 function midbrainHookEntry(role) {
   const entry = { type: 'command', command: buildHookCommand(role), timeout: HOOK_TIMEOUT_SEC };
-  if (role === 'assistant') entry.async = true;
+  // One-shot clients must wait for capture before exiting.
   return entry;
 }
 
@@ -252,7 +252,7 @@ export class Claude extends BaseClient {
         if (midbrain.length !== 1) return false;
         if (midbrain[0].command !== buildHookCommand(role)) return false;
         if (midbrain[0].timeout !== HOOK_TIMEOUT_SEC) return false;
-        if (role === 'assistant' && midbrain[0].async !== true) return false;
+        if (midbrain[0].async === true) return false;
       }
       return (await shimStatus('claude')).fresh;
     } catch { return true; } // if we can't read, don't repair

@@ -66,7 +66,7 @@ function canonicalClaudeSettings() {
         { hooks: [{ type: "command", command: cmd("user"), timeout: 30 }] },
       ],
       Stop: [
-        { hooks: [{ type: "command", command: cmd("assistant"), timeout: 30, async: true }] },
+        { hooks: [{ type: "command", command: cmd("assistant"), timeout: 30 }] },
       ],
     },
   };

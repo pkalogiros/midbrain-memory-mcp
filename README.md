@@ -551,7 +551,7 @@ Non-interactive installs always use the single shared (global) key.
 
 Claude Code global install also writes `UserPromptSubmit` and `Stop` capture
 hooks into `~/.claude/settings.json`. The hooks call a stable local shim
-(30-second timeout; the `Stop` hook is async):
+(30-second timeout; `Stop` waits for capture before the client exits):
 
 ```text
 ~/.midbrain/bin/claude-hook user
