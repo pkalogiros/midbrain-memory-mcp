@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { recallChecks, currentAnswerChecks, captureCountChecks } from '../harness/lib/checks.mjs';
-import { metadataChecks, readback } from '../harness/scenarios/_shared.mjs';
+import { metadataChecks, readback, runTurn } from '../harness/scenarios/_shared.mjs';
 import { HarnessApi } from '../harness/lib/api.mjs';
+import os from 'node:os';
 
 const turn = (result, ok = true) => ({ finalText: 'VALUE-secret', toolCalls: [{ name: 'midbrain__memory_search', input: { query: 'TASK' }, result, ok }] });
 const passed = checks => checks.every(c => c.ok);
@@ -9,6 +10,16 @@ const passed = checks => checks.every(c => c.ok);
 it('reports an unavailable readback API as blocked', async () => {
   const api = { waitForRows: async () => ({ rows: [], lastError: 'service unavailable' }) };
   await expect(readback({ options: {} }, api, 'marker', {})).rejects.toMatchObject({ blocked: true, message: expect.stringContaining('service unavailable') });
+});
+
+it('preserves native provider-error evidence before blocking the scenario', async () => {
+  const home = os.tmpdir();
+  const ctx = { dirs: { run: home, home }, turns: [], writeJson: vi.fn(), evidenceDir: () => home };
+  const client = { id: 'nanoclaw', runTurn: async () => ({ providerError: 'billing_error (HTTP 400)', isError: true }) };
+  await expect(runTurn({ ctx, client, project: home, prompt: 'test', scenarioId: 's08', label: 'provider-error' }))
+    .rejects.toMatchObject({ blocked: true, message: expect.stringContaining('billing_error') });
+  expect(ctx.turns).toHaveLength(1);
+  expect(ctx.writeJson.mock.calls[1][1].providerError).toBe('billing_error (HTTP 400)');
 });
 
 it('does not label post-upgrade capture as a cold first turn', async () => {

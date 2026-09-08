@@ -273,7 +273,7 @@ async function run(flags) {
       log(`upgrade prelude → ${Object.entries(ucells).map(([id, c]) => `${id}=${c.status}`).join(', ')}`);
     } catch (e) {
       log(`upgrade prelude failed: ${e.message}`);
-      for (const m of active) cells.push(cell({ row: 'Upgrade and self-repair', scenario: 's09-upgrade-continuity', client: m, checks: [check('upgrade prelude completed without harness error', false, (e.stack || String(e)).slice(0, 800))] }));
+      for (const m of active) cells.push(cell({ row: 'Upgrade and self-repair', scenario: 's09-upgrade-continuity', client: m, blockedReason: e.blocked ? e.message : undefined, checks: [check('upgrade prelude completed without harness error', false, (e.stack || String(e)).slice(0, 800))] }));
     }
   }
   for (const sc of scenarios) {

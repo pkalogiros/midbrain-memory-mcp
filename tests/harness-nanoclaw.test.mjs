@@ -29,6 +29,14 @@ describe('NanoClaw evidence', () => {
     expect(parsed.toolCalls).toEqual([{ id: 'new', name: 'mcp__midbrain__memory_search', input: { query: 'anchor' }, result: 'failed', ok: false }]);
     expect(parseTranscript(rows.map(JSON.stringify).join('\n'), 'missing prompt').toolCalls).toEqual([]);
   });
+  it('distinguishes native provider errors from ordinary assistant text', () => {
+    const user = { type: 'user', message: { content: 'prompt' } };
+    const failure = { type: 'assistant', isApiErrorMessage: true, error: 'billing_error', apiErrorStatus: 400, message: { content: [{ type: 'text', text: 'Credit balance is too low' }] } };
+    expect(parseTranscript([user, failure].map(JSON.stringify).join('\n'), 'prompt').providerError).toBe('billing_error (HTTP 400): Credit balance is too low');
+    const answer = { type: 'assistant', message: failure.message };
+    expect(parseTranscript([user, answer].map(JSON.stringify).join('\n'), 'prompt').providerError).toBeNull();
+    expect(parseTranscript([user, failure, answer].map(JSON.stringify).join('\n'), 'prompt').providerError).toBeNull();
+  });
   it('accepts only the actual container cwd when declared', () => {
     const rows = [{ memory_metadata: { client: 'nanoclaw', cwd: '/workspace/agent', session_id: 'sdk' } }];
     expect(metadataChecks(rows, 'nanoclaw', '/workspace/agent').every(c => c.ok)).toBe(true);

@@ -17,6 +17,7 @@ export async function runTurn({ ctx, client, project, prompt, scenarioId, label,
   ctx.writeJson(file, turn);
   turn.jsonPath = file;
   ctx.turns.push({ client: client.id, scenario: scenarioId, label, turn });
+  if (turn.providerError) throw new BlockedError(`${client.displayName || client.id} provider: ${turn.providerError}; see ${file}`);
   return turn;
 }
 

@@ -75,7 +75,11 @@ export function parseTranscript(text, prompt) {
       }
     }
   }
-  return { sessionId, toolCalls, nativeAssistantMessages: [...nativeMessages.values()] };
+  const lastAssistant = rows.slice(start).findLast(r => r.type === 'assistant');
+  const providerError = lastAssistant?.isApiErrorMessage
+    ? `${lastAssistant.error || 'API error'} (HTTP ${lastAssistant.apiErrorStatus || 'unknown'}): ${(lastAssistant.message?.content || []).map(b => b.text || '').join(' ')}`
+    : null;
+  return { sessionId, toolCalls, nativeAssistantMessages: [...nativeMessages.values()], providerError };
 }
 
 function writeJson(file, data) { writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 }); }
@@ -319,7 +323,7 @@ export class NanoClawRuntime {
       parsed = parseTranscript(text, prompt);
     }
     if (sid) this.sessions.set(sid, session);
-    return { client: 'nanoclaw', sessionId: sid, nanoSessionId: session.id, containerId: container, inboundId, prompt, finalText: this.redact(selectReply(snapshot.messages, inboundId)), toolCalls: parsed.toolCalls, nativeAssistantMessages: parsed.nativeAssistantMessages, init: null, exitCode, timedOut, isError: snapshot.ack !== 'completed' || !transcript || !parsed.sessionId, durationMs: Date.now() - started, rawPath, stderr: timedOut ? mailboxError : '', nativeCapture: true, evidenceDir };
+    return { client: 'nanoclaw', sessionId: sid, nanoSessionId: session.id, containerId: container, inboundId, prompt, finalText: this.redact(selectReply(snapshot.messages, inboundId)), toolCalls: parsed.toolCalls, nativeAssistantMessages: parsed.nativeAssistantMessages, init: null, exitCode, timedOut, isError: snapshot.ack !== 'completed' || !transcript || !parsed.sessionId || Boolean(parsed.providerError), providerError: parsed.providerError || null, durationMs: Date.now() - started, rawPath, stderr: timedOut ? mailboxError : '', nativeCapture: true, evidenceDir };
   }
 
   clearNpxCache() {
