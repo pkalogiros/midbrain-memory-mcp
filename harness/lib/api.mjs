@@ -72,20 +72,29 @@ export class HarnessApi {
   }
 
   /** Poll until `predicate` matches at least `minCount` rows or the ceiling passes. */
-  async waitForRows({ sinceIso, predicate, minCount = 1, timeoutMs = 90000, intervalMs = 5000 }) {
+  async waitForRows({ sinceIso, predicate, minCount = 1, timeoutMs = 90000, intervalMs = 5000, ready = rows => rows.length >= minCount, settleMs = 0 }) {
     const started = Date.now();
     let rows = [];
-    let lastError = null;
+    let lastError;
     let polls = 0;
+    let stableSince = null;
+    let previous = null;
     while (true) {
       polls += 1;
       try {
         rows = (await this.listEpisodicSince(sinceIso)).filter(predicate);
+        lastError = null;
       } catch (e) {
         lastError = e.message;
+        stableSince = null;
       }
       const elapsedMs = Date.now() - started;
-      if (rows.length >= minCount) return { rows, elapsedMs, timedOut: false, lastError, polls };
+      const signature = JSON.stringify(rows.map(r => r.id ?? r).sort((a, b) => String(a).localeCompare(String(b))));
+      if (!lastError && ready(rows)) {
+        if (stableSince === null || signature !== previous) stableSince = Date.now();
+        if (Date.now() - stableSince >= settleMs) return { rows, elapsedMs, timedOut: false, lastError, polls };
+      } else stableSince = null;
+      previous = signature;
       if (elapsedMs + intervalMs > timeoutMs) return { rows, elapsedMs, timedOut: true, lastError, polls };
       await sleep(intervalMs);
     }

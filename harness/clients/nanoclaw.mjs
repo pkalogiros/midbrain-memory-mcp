@@ -1,38 +1,77 @@
-// NanoClaw manifest. Driver is phase 3 (Docker-capable Linux runner). Preflight
-// reports the concrete blocker (no Docker daemon, no NanoClaw checkout).
-import { childEnv } from '../lib/context.mjs';
+// NanoClaw v2: the real Claude provider and agent-runner in Docker, driven by
+// an isolated local mailbox instead of a messaging-service account.
+import path from 'node:path';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { NanoClawRuntime, NANOCLAW_SHA, CAPTURE_CWD, dockerEnv } from '../lib/nanoclaw.mjs';
 import { BlockedError } from '../lib/checks.mjs';
-import { runSync, whichSync } from '../lib/proc.mjs';
+import { spawnCapture, whichSync } from '../lib/proc.mjs';
+import { walk } from '../lib/evidence.mjs';
+import { nanoSpecificCases } from '../scenarios/nanoclaw-lifecycle.mjs';
+
+const runtimes = new WeakMap();
 
 export default {
   id: 'nanoclaw',
   displayName: 'NanoClaw',
   os: ['linux', 'darwin'],
   binary: 'docker',
-  install: { kind: 'docker', hint: 'NanoClaw checkout at $NANOCLAW_HOME with container/Dockerfile and .claude/skills' },
+  install: { kind: 'docker', hint: 'Docker and Node 24+; pinned NanoClaw source/image are prepared run-locally' },
   requiredSecrets: ['ANTHROPIC_API_KEY'],
-  detectionFixtures: [
-    { path: 'nanoclaw/container/Dockerfile', content: '# harness fixture\n' },
-    { path: 'nanoclaw/.claude/skills/.harness-keep', content: '' },
-  ],
+  detectionFixtures: [],
   configShape: ['~/nanoclaw/.claude/skills/add-midbrain/SKILL.md', '~/nanoclaw/container/CLAUDE.md'],
-  mechanism: 'Claude Code inside a disposable container; hooks merged into data/v2-sessions/<group>/.claude-shared/settings.json; MIDBRAIN_CAPTURE_CLIENT=nanoclaw; MIDBRAIN_STATE_DIR=/home/node/.claude/.midbrain',
+  mechanism: 'Pinned NanoClaw v2 Claude provider in Docker; real SQLite mailbox, native SDK hooks, durable .claude-shared mount',
   expectedCaptureLabel: 'nanoclaw',
-  capabilities: { userCapture: true, assistantCapture: true, toolCapture: false, sessionResume: false, deferredTools: true },
+  captureCwd: CAPTURE_CWD,
+  capabilities: { userCapture: true, assistantCapture: true, toolCapture: false, sessionResume: true, deferredTools: true },
   knownExceptions: [
-    'Hook children do not inherit the MCP server environment; only ~/.claude is durable across --rm respawns.',
-    'First hook of a freshly created container can race startup persistence and miss once; recovery is at-least-once via the spool.',
-    'Legacy untouched groups rely on the v0.4.10 opener-recovery receipt (at-most-once attempt boundary).',
+    'No separate PostToolUse capture; tool calls/results are collected from the native Claude transcript.',
+    'The runner may request a formatting retry, producing multiple native assistant replies for one inbound message. Each native reply must be captured exactly once; duplicate or missing captures still fail.',
+    'The local mailbox transport excludes Slack/WhatsApp delivery, OneCLI gateway provisioning, and host routing from this MCP integration lane.',
   ],
-  specific: ['cold-wake', 'legacy-opener-recovery'],
-  clientEnv(ctx) { return childEnv(ctx, { ANTHROPIC_API_KEY: ctx.secrets.ANTHROPIC_API_KEY }); },
-  async preflight() {
-    if (!whichSync('docker')) throw new BlockedError('docker CLI not found');
-    const r = runSync('docker', ['info'], { timeout: 15000 });
-    if (r.code !== 0) throw new BlockedError('docker daemon not running');
-    throw new BlockedError('NanoClaw driver not implemented (phase 3): needs a NanoClaw checkout and container orchestration');
+  specific: ['cold-wake', 'session-resume', 'legacy-opener-recovery'],
+
+  runtime(ctx) {
+    const runtime = runtimes.get(ctx);
+    if (!runtime) throw new Error('NanoClaw was not prepared');
+    return runtime;
   },
-  async version() { return null; },
-  async runTurn() { throw new BlockedError('NanoClaw driver not implemented (phase 3)'); },
-  async evidence() { return []; },
+
+  async preflight(ctx, { doctor = false } = {}) {
+    if (!['darwin', 'linux'].includes(process.platform)) throw new BlockedError('NanoClaw requires Docker on Linux or macOS');
+    if (Number(process.versions.node.split('.')[0]) < 24) throw new BlockedError('NanoClaw mailbox requires Node 24+ (built-in SQLite)');
+    if (!whichSync('docker') || !whichSync('git')) throw new BlockedError('Docker and git must be on PATH');
+    const r = await spawnCapture('docker', ['info', '--format', '{{.ServerVersion}}'], { env: dockerEnv(), timeoutMs: 15000 });
+    if (r.code !== 0) throw new BlockedError('Docker daemon is unavailable');
+    if (doctor) return;
+    const runtime = new NanoClawRuntime(ctx, ctx.candidate);
+    runtimes.set(ctx, runtime);
+    ctx.cleanup.push(() => runtime.cleanup());
+    await runtime.prepare();
+  },
+
+  async version(ctx) {
+    const runtime = this.runtime(ctx);
+    return NANOCLAW_SHA + ' image=' + runtime.image;
+  },
+
+  async afterInstall(ctx, { projects }) { await this.runtime(ctx).group(projects[0]); },
+  async installedVersion(ctx) { return this.runtime(ctx).installedVersion(); },
+  async mcpList(ctx) { return this.runtime(ctx).probe(); },
+  async runTurn(args) { return this.runtime(args.ctx).turn(args); },
+  async specificCases(args) { return nanoSpecificCases({ ...args, runtime: this.runtime(args.ctx) }); },
+
+  async evidence(ctx, destDir) {
+    const runtime = this.runtime(ctx);
+    const source = path.join(runtime.root, 'data/v2-sessions');
+    const files = walk(source, f => /\.(jsonl|log)$/.test(f));
+    for (const file of files) {
+      const target = path.join(destDir, 'native', path.relative(source, file));
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, runtime.redact(readFileSync(file, 'utf8')), { mode: 0o600 });
+    }
+    const count = files.length;
+    const groups = [...runtime.groups.values()].map(g => ({ id: g.id, durableShim: existsSync(path.join(g.claude, '.midbrain/bin/claude-hook')), label: existsSync(path.join(g.claude, '.midbrain-capture-client')) ? readFileSync(path.join(g.claude, '.midbrain-capture-client'), 'utf8').trim() : null }));
+    ctx.writeJson(path.join(destDir, 'identity.json'), { ...runtime.identity, groups });
+    return [{ name: 'NanoClaw native evidence files', count }];
+  },
 };

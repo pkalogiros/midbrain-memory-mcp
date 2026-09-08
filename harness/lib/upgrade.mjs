@@ -8,7 +8,8 @@
 // accepts stable versions, so it cannot be exercised against a loopback or an
 // rc candidate. See docs/testing/multi-client-harness.md §7.
 import path from 'node:path';
-import { check, isMidbrainTool, inputText } from './checks.mjs';
+import { randomBytes } from 'node:crypto';
+import { check, recallChecks } from './checks.mjs';
 import { publishCandidate, npxVersion, clearNpxCache, registryLatest } from './registry.mjs';
 import { installCandidate, inspectInstall } from './home.mjs';
 import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } from '../scenarios/_shared.mjs';
@@ -20,14 +21,17 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
   const before = await npxVersion(ctx, candidate.name);
   const upstreamLatest = await registryLatest(ctx.registry, candidate.name);
   const oldMarkers = {};
+  const values = {};
   const oldChecks = {};
   for (const client of clients) {
     const m = ctx.subMarker(client.id, 'pre-upgrade');
     oldMarkers[client.id] = m;
+    values[client.id] = 'VALUE-' + randomBytes(8).toString('hex');
     const since = sinceNow();
-    const t = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: the harness marker for this session is ${m}. Reply with just the marker.`, scenarioId: SCENARIO, label: 'old-version-capture' });
+    const t = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: checkpoint ${m} has verification value ${values[client.id]}. Acknowledge the checkpoint.`, scenarioId: SCENARIO, label: 'old-version-capture' });
     const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1, minAssistant: 1 });
-    oldChecks[client.id] = { turn: t, rb };
+    const version = client.installedVersion ? await client.installedVersion(ctx) : before.version;
+    oldChecks[client.id] = { turn: t, rb, version };
   }
 
   await publishCandidate(ctx, candidate);
@@ -36,6 +40,7 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
   const after = await npxVersion(ctx, candidate.name);
 
   for (const client of clients) {
+    const clientVersion = client.installedVersion ? await client.installedVersion(ctx) : after.version;
     const m = oldMarkers[client.id];
     const mNew = ctx.subMarker(client.id, 'post-upgrade');
     const since = sinceNow();
@@ -43,8 +48,8 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
     const rb2 = await readback(ctx, api, mNew, { sinceIso: since, minUser: 1, minAssistant: 1 });
     const insp = await inspectInstall(ctx, candidate, client.id);
     await grace(ctx);
-    const t3 = await runTurn({ ctx, client, project, prompt: `Search your MidBrain memory for the token ${m} and tell me the exact token. Do not guess; if it is not in memory say "not found after search".`, scenarioId: SCENARIO, label: 'recall-old-after-upgrade' });
-    const memCalls = t3.toolCalls.filter(isMidbrainTool);
+    const t3 = await runTurn({ ctx, client, project, prompt: `Search your MidBrain memory for checkpoint ${m} and return its exact verification value. Do not guess; if it is not in memory say "not found after search".`, scenarioId: SCENARIO, label: 'recall-old-after-upgrade' });
+
     const { turn: t1, rb: rb1 } = oldChecks[client.id];
     out[client.id] = cell({
       row: 'Upgrade and self-repair', scenario: SCENARIO, client,
@@ -53,15 +58,16 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
       evidence: [relEvidence(ctx, t1.rawPath), relEvidence(ctx, t2.rawPath), relEvidence(ctx, t3.rawPath), 'evidence/_install/install-global.stdout.txt'],
       notes: `npx before=${before.version} after=${after.version}; loopback latest after publish=${candidate.registry.latestAfterPublish}; npx cache existed before clear=${cacheExisted}; inspect after upgrade=${JSON.stringify(insp).slice(0, 300)}`,
       checks: [
-        check(`previous published release resolved first (${upstreamLatest})`, before.version === upstreamLatest && before.version !== candidate.registry.publishVersion, `npx --version → ${before.version}`),
+        check(`previous published release resolved first (${upstreamLatest})`, before.version === upstreamLatest && before.version !== candidate.registry.publishVersion && oldChecks[client.id].version === upstreamLatest, `npx --version → ${before.version}`),
         ...turnChecks(t1),
         check('capture landed on the previous release', rb1.user.length >= 1 && rb1.assistant.length >= 1, `user=${rb1.user.length} assistant=${rb1.assistant.length}`),
         check('candidate published as latest on the loopback', candidate.registry.latestAfterPublish === candidate.registry.publishVersion, `latest=${candidate.registry.latestAfterPublish}`),
-        check('next resolution after cache clear runs the candidate', after.version === candidate.registry.publishVersion, `npx --version → ${after.version}`),
+        check('next resolution after cache clear runs the candidate', after.version === candidate.registry.publishVersion && clientVersion === candidate.registry.publishVersion, `host=${after.version}; client=${clientVersion}`),
         ...turnChecks(t2),
         check('capture landed on the candidate', rb2.user.length >= 1 && rb2.assistant.length >= 1, `user=${rb2.user.length} assistant=${rb2.assistant.length}`),
-        check('install still fresh after upgrade (no duplicate hooks, canonical shim)', insp.fresh === true || insp.fresh === null, `fresh=${insp.fresh}`),
-        check('fresh session on the candidate recalled pre-upgrade memory via MidBrain', memCalls.some((c) => inputText(c).includes(m)) && t3.finalText.includes(m), `memory calls=${memCalls.length}`),
+        check('install still fresh after upgrade (no duplicate hooks, canonical shim)', insp.fresh === true, `fresh=${insp.fresh}`),
+        ...turnChecks(t3),
+        ...recallChecks(t3, m, [values[client.id]]),
       ],
     });
   }

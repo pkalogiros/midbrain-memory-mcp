@@ -16,6 +16,10 @@ export function statusFromChecks(checks) {
   return checks.every((c) => c.ok) ? 'PASS' : 'FAIL';
 }
 
+export function runExitCode(cells, isolationOk) {
+  return isolationOk && cells.length > 0 && cells.every(c => c.status === 'PASS') ? 0 : 1;
+}
+
 export const NO_MATCH_FORBIDDEN = [
   /midbrain/i,
   /memory_search/i,
@@ -96,5 +100,42 @@ export function complianceChecks(turn, marker) {
   } else {
     checks.push(check('search deeper: not triggered (no empty MidBrain result)', true, 'n/a'));
   }
+  return checks;
+}
+
+// Answers alone are never retrieval evidence. Values are disclosed only to the
+// writer; every required value must occur in a successful MidBrain result.
+export function recallChecks(turn, anchor, values) {
+  const calls = (turn.toolCalls || []).filter(c => isMidbrainTool(c) && c.ok === true);
+  return [
+    check('successful MidBrain query preserves the exact anchor', calls.some(c => inputText(c).includes(anchor))),
+    ...values.flatMap(value => [
+      check(`stored evidence contains ${value}`, calls.some(c => resultText(c).includes(value))),
+      check(`answer contains ${value}`, turn.finalText.includes(value)),
+    ]),
+  ];
+}
+
+export function currentAnswerChecks(text, expected) {
+  let answer;
+  try { answer = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { /* invalid answer */ }
+  return [
+    check('answer names the current value unambiguously', answer?.current === expected),
+    check('answer cites evidence', typeof answer?.evidence === 'string' && answer.evidence.trim().length > 0),
+  ];
+}
+
+export function captureCountChecks(rows, turn) {
+  const users = rows.filter(r => r.role === 'user');
+  const assistants = rows.filter(r => r.role === 'assistant');
+  const native = turn.nativeAssistantMessages;
+  const checks = [check('exactly one captured user request', users.length === 1, `user rows=${users.length}`)];
+  if (!native) {
+    checks.push(check('exactly one captured assistant response', assistants.length === 1, `assistant rows=${assistants.length}`));
+    return checks;
+  }
+  const expected = native.map(m => m.text).sort();
+  const actual = assistants.map(r => String(r.text ?? r.content ?? '')).sort();
+  checks.push(check('every native assistant response captured exactly once', expected.length > 0 && JSON.stringify(expected) === JSON.stringify(actual), `native=${expected.length} captured=${actual.length}`));
   return checks;
 }

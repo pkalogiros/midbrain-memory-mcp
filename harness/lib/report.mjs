@@ -1,6 +1,7 @@
 // Side-by-side report (design doc "Suggested report shape") + JSON results.
 export const ROWS = [
   'Clean install',
+  'Reproducibility',
   'Upgrade and self-repair',
   'Tool availability',
   'User capture',
@@ -50,7 +51,8 @@ export function renderMarkdown(results) {
   lines.push('| Field | Value |');
   lines.push('|---|---|');
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
-  if (candidate.pack && !candidate.pack.error) lines.push(`| Package identity | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);
+  if (candidate.pack && !candidate.pack.error) lines.push(`| Source archive | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);
+  if (candidate.tarballSha256) lines.push(`| Tested archive SHA-256 | ${candidate.tarballSha256} |`);
   lines.push(`| Host | ${run.platform}/${run.arch} ${run.osRelease}, node ${run.node} |`);
   lines.push(`| Run marker | \`${run.marker}\` |`);
   lines.push(`| Started / finished | ${run.startedAt} / ${run.finishedAt} |`);

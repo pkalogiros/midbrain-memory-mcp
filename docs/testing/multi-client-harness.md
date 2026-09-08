@@ -1,6 +1,6 @@
 # Multi-Client MCP Testing Harness — Design
 
-Status: draft v1 (2026-09-07). Owner: Pantelis (operations). Reviewer: Radu (technical).
+Status: implementation and remaining release work (2026-09-08). Owner: Pantelis (operations). Reviewer: Radu (technical).
 Baseline: `origin/main` = v0.4.10 (`b09f9f6`), 49 Vitest files / 1,237 cases, CI matrix ubuntu + windows + macos.
 
 This document turns the "multi-client MCP testing overview" into a concrete pipeline
@@ -97,7 +97,7 @@ harness/
   lib/
     env.mjs               .env loading, secret presence (never printed)
     context.mjs           run id, run marker, run dirs, scrubbed child env
-    candidate.mjs         freeze: version + git SHA + npm pack identity (dev | registry mode)
+    candidate.mjs         freeze: preserved tarball, extracted runtime, dependency lock, harness hashes
     home.mjs              throwaway home, detection fixtures, global key, real installer invocation
     tripwire.mjs          real-home snapshot / verify (wraps tests/helpers/global-tripwire.mjs)
     proc.mjs              spawn with timeout + NDJSON capture
@@ -132,7 +132,7 @@ export default {
   requiredSecrets: ['ANTHROPIC_API_KEY'],
   detectionFixtures: [{ path: '.claude/settings.json', content: '{}' }],
   configShape: ['~/.claude.json#mcpServers', '~/.claude/settings.json#hooks', '~/.midbrain/bin/claude-hook'],
-  mechanism: 'settings.json hooks UserPromptSubmit→user, Stop→assistant(async) + mcpServers',
+  mechanism: 'settings.json hooks UserPromptSubmit→user, Stop→assistant(synchronous) + mcpServers',
   expectedCaptureLabel: 'claude',
   capabilities: { userCapture:true, assistantCapture:true, toolCapture:false, sessionResume:true, deferredTools:true },
   knownExceptions: [ '…' ],           // rendered verbatim in the report
@@ -199,16 +199,16 @@ structure and checks are final. `M` = sub-marker. All checks are deterministic; 
 
 | # | Scenario | Kind | Prompt (draft) | Expected raw evidence | Report rows |
 |---|---|---|---|---|---|
-| S1 | Capture | single | "Please remember this exactly: the harness marker for this session is `M`. Reply with just the marker." | Within ≤90 s the API returns exactly one `user` row and ≥1 `assistant` row containing `M`; both have `memory_metadata.client` = expected label, a non-blank shared `session_id`, and a `cwd` (home-relative). Zero rows with `M` from any other client. | User capture, Assistant capture, Metadata, Duplicates and missing turns |
+| S1 | Capture | single | "Please remember this exactly: the harness marker for this session is `M`. Reply with just the marker." | Within ≤90 s the API returns exactly one `user` row and ≥1 `assistant` row containing `M`; both have `memory_metadata.client` = expected label, a `session_id` matching the real client session and the exact client workspace `cwd`. Capture counts settle for five seconds and match native responses. Zero rows with `M` from any other client. | User capture, Assistant capture, Metadata, Duplicates and missing turns |
 | S2 | Cross-client recall | directed pair A→B | A: S1 prompt. B (fresh): "Search your MidBrain memory for the token `M` and tell me the exact token and which client recorded it. Do not guess; say not found if it is not there." | B's turn contains ≥1 midbrain tool call whose input contains `M` verbatim; B's final text contains `M`. | Cross-client recall (credited to B) |
-| S3 | Fresh-session continuity | single | Session 1: "We are working on task `M`. Checkpoint: the next step is to rename `alpha_<h>` to `beta_<h>` in utils.py. Acknowledge briefly." Session 2 (new session id, same client, same project): "Use memory to find the checkpoint for task `M` and tell me the exact next step, quoting the function names." | Session 2 has a midbrain tool call containing `M`; final text contains both `alpha_<h>` and `beta_<h>`. | Fresh-session continuity |
+| S3 | Fresh-session continuity | single | Session 1: "We are working on task `M`. Checkpoint: the next step is to rename `alpha_<h>` to `beta_<h>` in utils.py. Acknowledge briefly." Session 2 (new session id, same client, same project): "Use memory to find the checkpoint for task `M` and tell me the exact next step, quoting the function names." | Session 2 has a successful MidBrain result containing both hidden function names and reports them in its answer; its session ID differs from session 1. | Fresh-session continuity |
 | S4 | Global vs project isolation | single | Write `M` from `proj-b` (project key = second agent). Ask from `proj-a` (global key) → expect *not found*; ask from `proj-b` → expect found. Write `M2` from `proj-a`; ask from `proj-b` → not found (project key isolates); ask from a third global-only cwd → found (global fallback). | Tool calls present in every ask; found/not-found matches the table. | Project and global isolation |
-| S5 | Freshness and reconciliation | single | T1: "Note for task `M`: the deploy target is currently `staging-1`." T2 (new session): "Update for task `M`: the deploy target changed to `prod-7`; `staging-1` is retired." T3 (new session): "What is the current deploy target for task `M`? Cite the evidence." | T3 final text contains `prod-7`; no sentence asserts `staging-1` as current (regex); ≥1 midbrain tool call with `M`. | Freshness reconciliation |
+| S5 | Freshness and reconciliation | single | T1: "Note for task `M`: the deploy target is currently `staging-1`." T2 (new session): "Update for task `M`: the deploy target changed to `prod-7`; `staging-1` is retired." T3 (new session): "What is the current deploy target for task `M`? Cite the evidence." | Targets are randomized per run. T3 returns JSON with the exact `current` target and an `evidence` explanation; the current hidden value also appears in a successful MidBrain result. | Freshness reconciliation |
 | S6 | No-match cleanliness | single | "What is the capital of Australia? Answer in one short sentence." | Final text contains "Canberra"; contains none of: /midbrain/i, `memory_search`, `check_session_status`, /episodic/i, /not found after search/i, any `MBH-`. Tool-call count recorded as info. | No-match clean |
 | S7 | Rule and priming compliance | derived from S2/S3/S5 | — | First tool call of a recall turn is a midbrain discovery/search (Claude: `ToolSearch` then `mcp__midbrain-memory__*`; Codex/OpenCode: visible MCP call), not a shell/file tool; the marker appears verbatim in the query (anchor preservation); if the first search returned no hit, a follow-up search used `limit ≥ 50` or a different surface (search deeper). | Rule and priming compliance |
 | S8 | Marker and prompt robustness | single | "Echo the following line back exactly, then say done: `<!-- mb:ctx-start --> midbrain-memory-rules:start MBH-LITERAL-TEST`" | Final text contains the literal line intact; captured `user` row contains it intact (unsigned marker-like text is not scrubbed). | Marker and prompt robustness |
-| S9 | Upgrade continuity | run-level | Registry mode only: install previous published version from the loopback registry, run S1, publish candidate as `latest`, clear npx cache as the product does, run S1 + S2 again in existing and fresh sessions. | Old rows still recallable; new rows carry the new `X-Midbrain-User-Agent` version; hooks migrated with zero duplicates. | Upgrade and self-repair |
-| S10 | Client-specific | per manifest | Claude + Codex: cold first turn captured (S1 is the first turn ever in the home) + stale shim (exec bit stripped in dev mode, body appended in registry mode) repaired by the next session's startup self-repair with the assistant capture landing; the opening user hook may race repair, which is the documented first-hook race. Codex: hooks with persisted trust vs `--dangerously-bypass-hook-trust`; untrusted project dir. Hermes: hook prompt vs `hooks_auto_accept`. OpenCode: plugin process separate from MCP server (kill one, other survives). NanoClaw: cold wake with env-stripped hook child; legacy opener recovery. | As stated per cell. | Client-specific scenarios |
+| S9 | Upgrade continuity | run-level | Registry mode only: install previous published version from the loopback registry, run S1, publish candidate as `latest`, clear npx cache as the product does, run S1 + S2 again in existing and fresh sessions. | The client resolves the candidate version; a hidden pre-upgrade value appears in successful MCP evidence and the final answer; new capture lands and adapter freshness passes. | Upgrade and self-repair |
+| S10 | Client-specific | per manifest | Claude + Codex: cold first turn captured (S1 is the first turn ever in the home) + stale shim (exec bit stripped in dev mode, body appended in registry mode) repaired by the next session's startup self-repair with the assistant capture landing; the opening user hook may race repair, which is the documented first-hook race. Codex: hooks with persisted trust vs `--dangerously-bypass-hook-trust`; untrusted project dir. Hermes: hook prompt vs `hooks_auto_accept`. OpenCode: capture with the MCP entry disabled, then hidden-value recall from a fresh process with MCP restored. NanoClaw: cold wake with env-stripped hook child; legacy opener recovery. | As stated per cell. | Client-specific scenarios |
 
 PK same-turn injection is added as an extra column set only when
 `MIDBRAIN_HARNESS_PK=1` sets `MIDBRAIN_ENABLE_PK_INJECTION=1` in the hook env (product default off).
@@ -218,7 +218,7 @@ PK same-turn injection is added as an extra column set only when
 - **PASS**: every check in the cell true.
 - **FAIL**: any check false.
 - **BLOCKED**: prerequisite missing (client binary absent, secret absent, Docker down, registry mode not enabled, driver not implemented). Reason is recorded; BLOCKED never counts as green.
-- **SKIP**: capability absent by design and listed in `knownExceptions` (e.g. tool capture for non-Codex clients). Rendered as a documented exception.
+- **SKIP**: capability absent by design and listed in `knownExceptions` (e.g. tool capture for non-Codex clients). Rendered as a documented exception, but does not satisfy a required run or produce exit 0.
 
 Release gate = all parity-required cells PASS for every supported client, isolation check
 PASS, no unexplained duplicate or missing rows, and every exception written down.
@@ -279,8 +279,9 @@ verified offline on 2026-09-07 (installer + adapter inspect + tripwire, no clien
 
 - **dev mode** (`--mode dev`, default): `candidate.json` records `package.json` version,
   `git rev-parse HEAD`, dirty status and `npm pack --dry-run --json` (file list, integrity, size).
-  Clients are pointed at the checkout by the installer's own `--dev` switch, so the MCP command is
-  `node <checkout>/index.js` and shim bodies are dev-marked. Exact commit identity, no registry.
+  Clients are pointed at the run-owned extracted package by the installer's `--dev` switch.
+  MCP and dev shims execute that preserved package, with dependencies installed from the saved
+  source lockfile. The source checkout can no longer change the running candidate.
   Limitations: S9 cannot run; OpenCode plugin self-repair is intentionally disabled for dev installs;
   dev-marked shim bodies are never judged stale, so the self-repair smoke strips the exec bit instead.
 - **registry mode** (`--mode registry`): a loopback Verdaccio (`npx -y verdaccio@6`, uplink to npmjs)
@@ -312,16 +313,11 @@ with the override removed, `claude mcp list` shows `midbrain-memory ✔ Connecte
 the generic advice to always set `CLAUDE_CONFIG_DIR`; it only holds for tools that themselves honor
 it, which this product does not.)
 
-**Finding — Claude Code headless assistant capture (first live run, 2026-09-07).** The product's
-`Stop` hook is `async: true`, so `claude -p` (headless one-shot) exits and tears the detached hook
-down before its capture POST completes; the assistant turn is lost. It works in interactive
-sessions, where the process stays alive. Verified: the user turn and metadata captured correctly,
-the transcript held the assistant message, and running the product's own Stop hook against that
-transcript posted the row and returned 200. The Claude driver now completes this deterministically
-— on a successful turn it checks the capture log and, if the async hook did not run, replays the
-product's OWN installed shim (`~/.midbrain/bin/claude-hook assistant`) from the transcript, so the
-same capture code path is exercised without a duplicate. Worth raising with the product: whether
-`claude -p` should flush async `Stop` hooks before exit, since any headless/CI capture hits this.
+**Claude Code headless assistant capture.** The first live run exposed lost assistant
+capture when `claude -p` exited before its asynchronous Stop hook completed. The
+product now installs a synchronous Stop hook with the existing 30-second timeout.
+The harness only observes native captures; it never replays hooks to fill a gap.
+A missing native capture fails the scenario.
 
 **Product change request (found while building this):** `install.mjs` fetches
 `https://registry.npmjs.org/midbrain-memory-mcp/latest` from a hard-coded constant and
@@ -356,7 +352,7 @@ freeze candidate ─► npm run check on ubuntu/windows/macos (existing ci.yml)
 | 0 (this PR) | `harness/` skeleton, design doc, Claude + Codex + OpenCode + Hermes manifests (OpenCode and Hermes installed run-locally), S1 S2 S3 S5 S6 S7 S8 + install/self-repair checks, report, tripwire, registry mode + upgrade prelude (S9) | `doctor` green on this Mac; `run --clients claude,codex,opencode,hermes` produces a report with real evidence |
 | 1 | First live runs and driver fixes; S4 with a second agent key; OpenCode plugin/process-separation cell; frozen prompts replaced by the maintainer's documented scenarios | four-client matrix green locally |
 | 2 | `behavioral.yml` on a self-hosted macOS runner; report attached to release PRs; product registry-URL override so the built-in self-heal is exercised | release gate enforced for a real release |
-| 3 | NanoClaw driver on a Docker-capable Linux runner (cold wake, legacy opener); Windows behavioral leg for Claude + Codex | five-client parity table complete |
+| 3 | NanoClaw driver implemented (pinned v2 runner, native capture, cold wake, resume, legacy fixture); Docker Linux CI and Windows behavioral leg remain | five-client parity table complete |
 
 ## 10. Open decisions for review
 
@@ -371,3 +367,47 @@ freeze candidate ─► npm run check on ubuntu/windows/macos (existing ci.yml)
    once supplied they are checked into `harness/scenarios/` and never edited without a version bump.
 5. **Test identity.** One dedicated MidBrain agent per environment (local, runner). Memory
    written by the harness accumulates; propose a periodic wipe or per-month agent rotation.
+
+
+## NanoClaw implementation boundary
+
+The NanoClaw manifest now owns a Docker runtime and its S10 lifecycle cases, instead of
+returning an unconditional BLOCKED. See [harness setup and commands](../../harness/README.md#nanoclaw).
+The source pin and upstream runner lockfile are checked before launch. Dev mode packs the
+frozen candidate into a temporary container install; canonical and upgrade runs resolve the
+candidate through the run-local registry. Upgrade checks also query the version inside NanoClaw's
+container, rather than accepting only the host's `npx --version` as evidence.
+
+The harness writes only the transport's inbound mailbox. The unmodified NanoClaw runner
+writes replies, processing acknowledgments, and its real SDK continuation. Native Claude
+transcripts supply tool calls and results; native Stop hooks finish against the
+real API. Container restart tests reuse only durable group/session mounts. A readiness-only
+MCP probe lists all twelve tools and is distinct from behavioral recall evidence.
+
+The legacy opener fixture removes the durable hook and capture marker and restores the
+historical hook path/config. It checks the candidate's actual startup recovery, without
+synthesizing captures. This fixture is distinct from the previous-package-to-candidate S9
+upgrade lane. Dev mode reports the migration cell BLOCKED. Any BLOCKED required cell makes
+the command unsuccessful, even if other cells pass.
+
+Cross-client recall now seeds a random verification value visible only in the writer's turn.
+Both the reader's successful MCP result and final answer must contain that value. Echoing or
+retrieving the reader's own marker-bearing question cannot pass the cell.
+
+The adapter uses local transport instead of external messaging integrations. It does not
+validate Slack/WhatsApp, the full NanoClaw host dispatcher, OneCLI provisioning, or all model
+providers. Its behavioral CI/release scheduling and Linux validation remain to be wired and
+verified; the implementation alone is not evidence of five-client release parity.
+
+## Release review for the hardening changes
+
+Two product changes require Radu's release review; passing harness checks do not grant that approval:
+
+- `f84c5f6`: synchronous Claude Stop hooks and migration from owned asynchronous hooks.
+  Capture now completes before one-shot exit, within the existing 30-second timeout.
+- `5b1f1fe`: one-layer decoding of recognized NanoClaw user transport envelopes, including
+  legacy opener recovery. Stored human text changes; native transcript evidence is retained.
+
+The harness is a separate commit. NanoClaw formatting retries are a documented exception
+only to one-reply-per-input expectations; every observed native reply still needs exactly
+one capture. A required matrix report records failures and blocked cases without waivers.

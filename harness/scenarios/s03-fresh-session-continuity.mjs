@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { check, complianceChecks, isMidbrainTool, inputText } from '../lib/checks.mjs';
+import { check, complianceChecks, isMidbrainTool, recallChecks } from '../lib/checks.mjs';
 import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } from './_shared.mjs';
 
 export default {
@@ -32,9 +32,7 @@ export default {
       cell({ row: 'Fresh-session continuity', scenario: this.id, client, prompt: p2, expected, evidence, notes, checks: [
         ...turnChecks(t2),
         check('fresh session has a different session id', t2.sessionId && t1.sessionId && t2.sessionId !== t1.sessionId, `${t1.sessionId} → ${t2.sessionId}`),
-        check('fresh session made a MidBrain tool call containing the marker', memCalls.some((c) => inputText(c).includes(m)), `calls=${memCalls.length}`),
-        check(`answer quotes ${a}`, t2.finalText.includes(a)),
-        check(`answer quotes ${b}`, t2.finalText.includes(b)),
+        ...recallChecks(t2, m, [a, b]),
       ] }),
       cell({ row: 'Rule and priming compliance', scenario: this.id, client, prompt: p2, expected: 'memory-first ordering, anchor preserved, search deepened on miss', evidence, checks: complianceChecks(t2, m) }),
     ];

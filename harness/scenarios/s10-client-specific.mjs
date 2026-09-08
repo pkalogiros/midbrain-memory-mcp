@@ -1,7 +1,11 @@
-import { check } from '../lib/checks.mjs';
+import path from 'node:path';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { parse, modify, applyEdits } from 'jsonc-parser';
+import { check, captureCountChecks, recallChecks } from '../lib/checks.mjs';
 import { sleep } from '../lib/api.mjs';
 import { inspectInstall, tamperShim } from '../lib/home.mjs';
-import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow } from './_shared.mjs';
+import { runTurn, readback, turnChecks, metadataChecks, grace, cell, relEvidence, sinceNow } from './_shared.mjs';
 
 async function selfRepairSmoke({ ctx, api, client, project, candidate, scenarioId }) {
   const expected = 'A stale shim is detected as not fresh by the product adapter; the next client session triggers startup self-repair which restores the canonical shim; the assistant capture of that session lands (the opening user hook may race repair, which is the documented first-hook race).';
@@ -52,36 +56,80 @@ async function hookTrustPersisted({ ctx, api, client, project, scenarioId }) {
   const since = sinceNow();
   const t = await runTurn({ ctx, client, project, prompt, scenarioId, label: 'no-bypass', hookTrust: 'persisted' });
   const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
-  const captured = rb.user.length >= 1;
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected,
     evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath)],
-    status: captured ? 'PASS' : 'SKIP',
-    notes: captured ? 'hooks ran without bypass in this Codex version' : 'documented exception: no capture without persisted hook trust; interactive /hooks approval required once per home',
-    checks: [check('turn completed', t.exitCode === 0 && !t.timedOut), check('user row captured without hook-trust bypass', captured, `user rows=${rb.user.length}`)] });
+    blockedReason: 'The installed Codex CLI exposes hooks/list but no headless persisted-approval operation. Before/after /hooks approval still requires an interactive test; bypass is not approval.',
+    checks: [...turnChecks(t), check('unapproved hooks produce no capture', !rb.lastError && rb.rows.length === 0, `rows=${rb.rows.length}`)] });
 }
 
 async function hookAcceptance({ ctx, api, client, project, scenarioId }) {
   const expected = 'Without hook acceptance Hermes leaves the MidBrain hooks un-allowlisted and no capture lands; with HERMES_ACCEPT_HOOKS=1 the hooks are allowlisted and capture lands. The installer never flips the global toggle.';
-  const before = typeof client.hooksList === 'function' ? await client.hooksList(ctx) : '';
-  const m = ctx.subMarker(client.id, 'hookconsent');
-  const prompt = `Reply with exactly this token and nothing else: ${m}`;
+  const allowlist = path.join(ctx.dirs.home, '.hermes', 'shell-hooks-allowlist.json');
+  const original = existsSync(allowlist) ? readFileSync(allowlist) : null;
+  const checks = [], evidence = [];
+  try {
+    rmSync(allowlist, { force: true });
+    for (const accepted of [false, true]) {
+      const marker = ctx.subMarker(client.id, accepted ? 'accepted' : 'unapproved');
+      const since = sinceNow();
+      const t = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${marker}`, scenarioId,
+        label: accepted ? 'with-acceptance' : 'without-acceptance', acceptHooks: accepted });
+      const rb = await readback(ctx, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
+      const file = path.join(ctx.evidenceDir(client.id, scenarioId), accepted ? 'accepted.readback.json' : 'unapproved.readback.json');
+      ctx.writeJson(file, rb);
+      evidence.push(relEvidence(ctx, t.jsonPath), relEvidence(ctx, file));
+      checks.push(...turnChecks(t), check('API observation succeeded', !rb.lastError));
+      if (accepted) checks.push(...captureCountChecks(rb.rows, t), ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId));
+      else checks.push(check('no user or assistant capture before acceptance', rb.timedOut && rb.rows.length === 0));
+    }
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-acceptance`, client, expected, evidence, checks });
+  } finally {
+    if (original) writeFileSync(allowlist, original);
+    else rmSync(allowlist, { force: true });
+  }
+}
+
+async function hookOrdering({ ctx, api, client, project, scenarioId }) {
+  const marker = ctx.subMarker(client.id, 'hook-order');
   const since = sinceNow();
-  const t = await runTurn({ ctx, client, project, prompt, scenarioId, label: 'without-acceptance', acceptHooks: false });
-  const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
-  const listAfter = typeof client.hooksList === 'function' ? await client.hooksList(ctx) : '';
-  const midbrainLines = (txt) => txt.split('\n').filter((l) => /midbrain/i.test(l));
-  return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-acceptance`, client, prompt, expected,
-    evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath)],
-    notes: `hooks list before: ${midbrainLines(before).join(' | ') || '(none)'}; after unapproved turn: ${midbrainLines(listAfter).join(' | ') || '(none)'}; user rows without acceptance=${rb.user.length}`,
-    checks: [
-      check('installer left MidBrain hooks configured but not allowlisted', midbrainLines(before).length >= 1 && midbrainLines(before).every((l) => /not allowlisted/i.test(l)), midbrainLines(before).join(' | ')),
-      check('unapproved turn completed (fail-open)', t.exitCode === 0 && !t.timedOut, `exit=${t.exitCode}`),
-      check('no capture landed without hook acceptance', rb.user.length === 0, `user rows=${rb.user.length}`),
-      check('hooks remain un-allowlisted after the unapproved turn', midbrainLines(listAfter).every((l) => /not allowlisted/i.test(l)), midbrainLines(listAfter).join(' | ')),
+  const t = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${marker}`, scenarioId, label: 'native-hooks' });
+  const rb = await readback(ctx, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
+  const file = path.join(ctx.evidenceDir(client.id, scenarioId), 'native-hooks.readback.json');
+  ctx.writeJson(file, rb);
+  return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-ordering`, client,
+    expected: 'Native UserPromptSubmit and Stop complete in order without harness replay.',
+    evidence: [relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)], checks: [
+      ...turnChecks(t), ...captureCountChecks(rb.rows, t), ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId),
+      check('capture settled without API errors', !rb.timedOut && !rb.lastError),
+      check('user capture precedes assistant capture', Number.isFinite(Date.parse(rb.user[0]?.created_at)) && Date.parse(rb.user[0].created_at) <= Date.parse(rb.assistant[0]?.created_at)),
     ] });
 }
 
-const HANDLERS = { 'self-repair-smoke': selfRepairSmoke, 'cold-first-turn': coldFirstTurn, 'hook-trust-persisted': hookTrustPersisted, 'hook-acceptance': hookAcceptance };
+async function pluginProcessSeparation({ ctx, api, client, project, scenarioId }) {
+  const file = path.join(ctx.dirs.home, '.config/opencode/opencode.jsonc');
+  const original = readFileSync(file, 'utf8');
+  const entries = Object.keys(parse(original).mcp || {}).filter(key => /midbrain/i.test(key));
+  if (entries.length !== 1) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/plugin-process-separation`, client, blockedReason: 'Expected one MidBrain MCP config entry' });
+  const marker = ctx.subMarker(client.id, 'plugin-only'), value = 'VALUE-' + randomBytes(8).toString('hex');
+  let writer, rb;
+  try {
+    writeFileSync(file, applyEdits(original, modify(original, ['mcp', entries[0], 'enabled'], false, {})));
+    const since = sinceNow();
+    writer = await runTurn({ ctx, client, project, prompt: `Remember checkpoint ${marker}: verification value ${value}. Reply with exactly ${marker}.`, scenarioId, label: 'plugin-without-mcp' });
+    rb = await readback(ctx, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
+  } finally { writeFileSync(file, original); }
+  await grace(ctx);
+  const reader = await runTurn({ ctx, client, project, prompt: `Recall checkpoint ${marker} from MidBrain and report its exact verification value.`, scenarioId, label: 'mcp-restored' });
+  const rbFile = path.join(ctx.evidenceDir(client.id, scenarioId), 'plugin-only.readback.json');
+  ctx.writeJson(rbFile, rb);
+  return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/plugin-process-separation`, client,
+    expected: 'The plugin captures with its MCP entry disabled; a new process with MCP enabled retrieves the hidden value.',
+    evidence: [relEvidence(ctx, writer.jsonPath), relEvidence(ctx, reader.jsonPath), relEvidence(ctx, rbFile)],
+    checks: [...turnChecks(writer), ...captureCountChecks(rb.rows, writer), check('native capture settled', !rb.timedOut && !rb.lastError),
+      ...turnChecks(reader), ...recallChecks(reader, marker, [value])] });
+}
+
+const HANDLERS = { 'hook-ordering': hookOrdering, 'plugin-process-separation': pluginProcessSeparation, 'self-repair-smoke': selfRepairSmoke, 'cold-first-turn': coldFirstTurn, 'hook-trust-persisted': hookTrustPersisted, 'hook-acceptance': hookAcceptance };
 
 export default {
   id: 's10-client-specific',
@@ -91,6 +139,7 @@ export default {
   rows: ['Client-specific scenarios', 'Upgrade and self-repair'],
   async run(args) {
     const { client } = args;
+    if (client.specificCases) return client.specificCases(args);
     const cells = [];
     for (const name of client.specific || []) {
       const handler = HANDLERS[name];

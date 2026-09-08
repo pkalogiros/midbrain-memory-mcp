@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { check, complianceChecks, isMidbrainTool, inputText, resultText } from '../lib/checks.mjs';
 import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } from './_shared.mjs';
 
@@ -9,9 +10,10 @@ export default {
   rows: ['Cross-client recall', 'Rule and priming compliance'],
   async run({ ctx, api, writer, reader, project }) {
     const m = ctx.subMarker(writer.id, `xrecall-${reader.id}`);
-    const writePrompt = `Please remember this exactly: the harness marker for this session is ${m}. Reply with just the marker.`;
-    const readPrompt = `Search your MidBrain memory for the token ${m} and tell me the exact token and which client recorded it. Do not guess; if it is not in memory say "not found after search".`;
-    const expected = `Reader (${reader.displayName}) makes at least one MidBrain tool call whose input contains the marker verbatim and answers with the marker written by ${writer.displayName}.`;
+    const value = 'VALUE-' + randomBytes(8).toString('hex');
+    const writePrompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it and acknowledge briefly.`;
+    const readPrompt = `Search your MidBrain memory for task ${m} and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say "not found after search".`;
+    const expected = `Reader (${reader.displayName}) makes at least one MidBrain tool call whose input contains the marker verbatim and recovers the hidden verification value written by ${writer.displayName}; the reader prompt never contains that value.`;
     const since = sinceNow();
     const wTurn = await runTurn({ ctx, client: writer, project, prompt: writePrompt, scenarioId: this.id, label: `write-for-${reader.id}` });
     const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
@@ -31,8 +33,8 @@ export default {
         ...turnChecks(rTurn),
         check('reader made at least one MidBrain tool call', memCalls.length >= 1, `calls=${memCalls.length}`),
         check('a MidBrain call input contains the marker verbatim', memCalls.some((c) => inputText(c).includes(m))),
-        check('a MidBrain call result contains the marker (raw evidence)', memCalls.some((c) => resultText(c).includes(m))),
-        check('reader final answer contains the marker', rTurn.finalText.includes(m)),
+        check('successful MidBrain result contains the writer verification value', memCalls.some((c) => c.ok === true && resultText(c).includes(value))),
+        check('reader final answer contains the hidden writer value', rTurn.finalText.includes(value)),
       ] }),
       cell({ row: 'Rule and priming compliance', scenario: this.id, client: reader, prompt: readPrompt, expected: 'memory-first ordering, anchor preserved, search deepened on miss', evidence, notes: `recall from ${writer.id}`, checks: complianceChecks(rTurn, m) }),
     ];

@@ -1,4 +1,4 @@
-import { check } from '../lib/checks.mjs';
+import { check, captureCountChecks } from '../lib/checks.mjs';
 import { rowMeta } from '../lib/api.mjs';
 import { runTurn, readback, metadataChecks, turnChecks, cell, relEvidence, sinceNow, logSnippet } from './_shared.mjs';
 
@@ -11,7 +11,7 @@ export default {
   async run({ ctx, api, client, project }) {
     const m = ctx.subMarker(client.id, 'capture');
     const prompt = `Please remember this exactly: the harness marker for this session is ${m}. Reply with just the marker.`;
-    const expected = 'Exactly one user row and one assistant row containing the marker reach the API with client label, shared session_id and home-relative cwd; no duplicates; no rows from other clients.';
+    const expected = 'Exactly one user row and one capture per native assistant response containing the marker reach the API with client label, shared session_id and home-relative cwd; no duplicates; no rows from other clients.';
     const since = sinceNow();
     const turn = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'turn-1' });
     ctx.meta.firstTurn = ctx.meta.firstTurn || {};
@@ -27,10 +27,10 @@ export default {
     return [
       cell({ ...base, row: 'User capture', checks: [...turnChecks(turn), check('user row containing the marker reached the API', rb.user.length >= 1, `user rows=${rb.user.length}`)] }),
       cell({ ...base, row: 'Assistant capture', checks: [check('assistant row containing the marker reached the API', rb.assistant.length >= 1, `assistant rows=${rb.assistant.length}`)] }),
-      cell({ ...base, row: 'Metadata', checks: metadataChecks(rb.rows, client.expectedCaptureLabel) }),
+      cell({ ...base, row: 'Metadata', checks: metadataChecks(rb.rows, client.expectedCaptureLabel, turn.captureCwd, turn.sessionId) }),
       cell({ ...base, row: 'Duplicates and missing turns', checks: [
-        check('exactly one user row for the marker (no duplicate, no missing)', rb.user.length === 1, `user rows=${rb.user.length}`),
-        check('exactly one assistant row for the marker', rb.assistant.length === 1, `assistant rows=${rb.assistant.length}`),
+        check('capture observation settled without API errors', !rb.timedOut && !rb.lastError),
+        ...captureCountChecks(rb.rows, turn),
         check('no rows with this marker from another client', foreign.length === 0, `foreign rows=${foreign.length}`),
       ] }),
     ];

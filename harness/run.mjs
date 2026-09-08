@@ -9,7 +9,7 @@ import os from 'node:os';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { loadDotEnv, collectSecrets } from './lib/env.mjs';
 import { createRunContext, defaultRoot, HARNESS_DIR, HARNESS_VERSION } from './lib/context.mjs';
-import { freezeCandidate } from './lib/candidate.mjs';
+import { freezeCandidate, assertCandidate } from './lib/candidate.mjs';
 import { selectManifests, ORDER, MANIFESTS } from './clients/index.mjs';
 import { selectScenarios, SCENARIOS } from './scenarios/index.mjs';
 import { HarnessApi, DEFAULT_API_BASE } from './lib/api.mjs';
@@ -17,7 +17,7 @@ import { snapshot, diff, keyCollidesWithRealHome } from './lib/tripwire.mjs';
 import { seedDetectionFixtures, writeGlobalKey, writeGlobalHostConfig, initProject, installCandidate, inspectInstall } from './lib/home.mjs';
 import { configShapeSnapshot, cacheSpoolCounts } from './lib/evidence.mjs';
 import { renderMarkdown } from './lib/report.mjs';
-import { check, BlockedError, isMidbrainTool } from './lib/checks.mjs';
+import { check, BlockedError, isMidbrainTool, runExitCode } from './lib/checks.mjs';
 import { whichSync, runSync } from './lib/proc.mjs';
 import { cell, blockedCells } from './scenarios/_shared.mjs';
 import { prepareRegistry } from './lib/registry.mjs';
@@ -150,6 +150,7 @@ async function run(flags) {
   const mode = flags.mode || 'dev';
   const upgrade = Boolean(flags.upgrade);
   if (upgrade && mode !== 'registry') throw new Error('--upgrade requires --mode registry');
+  if (flags.required && (mode !== 'registry' || !upgrade || flags.clients || flags.scenarios)) throw new Error('--required needs --mode registry --upgrade and the full client/scenario matrix');
   const root = flags.root ? path.resolve(flags.root) : defaultRoot();
   if (insideTmp(root)) throw new Error(`run root ${root} is inside the temp dir; the product skips self-repair there`);
   const ctx = createRunContext({
@@ -159,11 +160,30 @@ async function run(flags) {
       indexGraceMs: num(flags['index-grace-ms'], num(process.env.MIDBRAIN_HARNESS_INDEX_GRACE_MS, 20000)),
       pollIntervalMs: num(flags['poll-interval-ms'], 5000),
       keep: Boolean(flags.keep),
+      required: Boolean(flags.required),
       upgrade,
     },
   });
   ctx.secrets = secrets;
-  const candidate = await freezeCandidate({ mode });
+  ctx.cleanup = [];
+  let cleanupPromise;
+  const cleanupRun = () => cleanupPromise ||= (async () => {
+    const results = await Promise.allSettled(ctx.cleanup.map(fn => fn()));
+    if (ctx.registry) await ctx.registry.stop();
+    const failure = results.find(r => r.status === 'rejected');
+    if (failure) throw failure.reason;
+  })();
+  const interrupted = async signal => {
+    try { await cleanupRun(); } catch (e) { log(`cleanup failed: ${e.message}`); }
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  const onInt = () => interrupted('SIGINT');
+  const onTerm = () => interrupted('SIGTERM');
+  process.once('SIGINT', onInt);
+  process.once('SIGTERM', onTerm);
+  try {
+  const candidate = await freezeCandidate({ mode, directory: path.join(ctx.dirs.run, 'candidate') });
+  ctx.candidate = candidate;
   if (mode === 'registry') {
     log('starting loopback registry (verdaccio) …');
     await prepareRegistry(ctx, candidate, { publish: !upgrade });
@@ -208,7 +228,7 @@ async function run(flags) {
 
   let installResult = null;
   if (runnable.length) {
-    log(`installing candidate (dev mode) into ${ctx.dirs.home} for ${runnable.map((m) => m.id).join(', ')}`);
+    log(`installing candidate (${mode} mode) into ${ctx.dirs.home} for ${runnable.map((m) => m.id).join(', ')}`);
     installResult = await installCandidate(ctx, candidate, { cwd: projA });
     log(`installer exit ${installResult.code}`);
   }
@@ -216,7 +236,15 @@ async function run(flags) {
   for (const st of clientStates) {
     const m = st.manifest;
     if (!st.runnable) { cells.push(...blockedCells(['Clean install'], 'install', m, st.blockedReason)); continue; }
-    if (typeof m.afterInstall === 'function') await m.afterInstall(ctx, { projects: [projA, projB, projC] });
+    try {
+      if (typeof m.afterInstall === 'function') await m.afterInstall(ctx, { projects: [projA, projB, projC] });
+    } catch (e) {
+      st.runnable = false;
+      st.blockedReason = `client setup failed: ${e.message}`;
+      cells.push(cell({ row: 'Clean install', scenario: 'install', client: m, checks: [check('client setup completed', false, e.message)] }));
+      log(`${m.id}: ${st.blockedReason}`);
+      continue;
+    }
     const insp = await inspectInstall(ctx, candidate, m.id);
     st.configShape = configShapeSnapshot(ctx, m);
     const missing = Object.entries(st.configShape).filter(([, v]) => v === 'ABSENT').map(([k]) => k);
@@ -228,7 +256,7 @@ async function run(flags) {
       checks: [
         check('installer exited 0', installOk, installResult ? `exit=${installResult.code}` : 'not run'),
         check('adapter reports client installed', insp.installed === true, `installed=${insp.installed}`),
-        check('adapter reports install fresh (hooks/plugins/shim canonical)', insp.fresh === true || insp.fresh === null, `fresh=${insp.fresh}`),
+        check('adapter reports install fresh (hooks/plugins/shim canonical)', insp.fresh === true, `fresh=${insp.fresh}`),
         check('all declared config surfaces present', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : ''),
       ],
     }));
@@ -278,7 +306,7 @@ async function run(flags) {
     const inits = turns.map((t) => t.init).filter(Boolean);
     const connectedInit = inits.some((i) => (i.mcpServers || []).some((sv) => /midbrain/i.test(String(sv.name)) && /connected|ready|ok/i.test(String(sv.status || ''))));
     const toolsListed = inits.some((i) => (i.tools || []).some((n) => /midbrain/i.test(String(n))));
-    const successfulCall = turns.some((t) => (t.toolCalls || []).some((c) => isMidbrainTool(c) && c.ok !== false && c.result));
+    const successfulCall = turns.some((t) => (t.toolCalls || []).some((c) => isMidbrainTool(c) && c.ok === true && c.result));
     let probe = null;
     if (!connectedInit && !successfulCall && typeof m.mcpList === 'function') {
       try { probe = await m.mcpList(ctx); } catch (e) { probe = { code: -1, text: e.message, connected: false }; }
@@ -295,6 +323,11 @@ async function run(flags) {
     try { await m.evidence(ctx, path.join(ctx.dirs.evidence, m.id)); } catch (e) { log(`evidence collection failed for ${m.id}: ${e.message}`); }
   }
 
+  assertCandidate(candidate);
+  for (const st of clientStates.filter(s => s.runnable)) {
+    const finalVersion = await st.manifest.version(ctx);
+    cells.push(cell({ row: 'Reproducibility', scenario: 'client-version', client: st.manifest, checks: [check('client version remained unchanged', Boolean(st.version) && finalVersion === st.version, `${st.version} → ${finalVersion}`)] }));
+  }
   if (ctx.registry) { await ctx.registry.stop(); log('loopback registry stopped'); }
   const after = snapshot();
   const drift = diff(before, after);
@@ -303,11 +336,12 @@ async function run(flags) {
   const results = {
     harnessVersion: HARNESS_VERSION,
     run: {
+      required: ctx.options.required,
       runId: ctx.runId, marker: ctx.marker, platform: ctx.platform, arch: ctx.arch, osRelease: ctx.osRelease, node: ctx.node,
       startedAt: ctx.startedAt, finishedAt: new Date().toISOString(),
       readbackTimeoutMs: ctx.options.readbackTimeoutMs, indexGraceMs: ctx.options.indexGraceMs,
       apiBase: apiBaseUrl(), runDir: ctx.dirs.run, cacheSpool: cacheSpoolCounts(ctx),
-      models: { claude: process.env.MIDBRAIN_HARNESS_CLAUDE_MODEL || 'client default', codex: process.env.MIDBRAIN_HARNESS_CODEX_MODEL || 'client default' },
+      models: { opencode: process.env.MIDBRAIN_HARNESS_OPENCODE_MODEL || 'client default', hermes: MANIFESTS.hermes?.options?.model || process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5', claude: process.env.MIDBRAIN_HARNESS_CLAUDE_MODEL || 'client default', codex: process.env.MIDBRAIN_HARNESS_CODEX_MODEL || 'client default', nanoclaw: process.env.MIDBRAIN_HARNESS_NANOCLAW_MODEL || 'claude-sonnet-4-5' },
     },
     candidate,
     clients: clientStates.map(({ manifest: _m, ...rest }) => rest),
@@ -323,7 +357,12 @@ async function run(flags) {
   log(`done: ${Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(' ')} · isolation ${drift.length ? `DRIFT(${drift.length})` : 'ok'}`);
   log(`report: ${path.join(ctx.dirs.run, 'report.md')}`);
   console.log(path.join(ctx.dirs.run, 'report.md'));
-  process.exitCode = (counts.FAIL || 0) === 0 && drift.length === 0 ? 0 : 1;
+  process.exitCode = runExitCode(cells, drift.length === 0);
+  } finally {
+    process.removeListener('SIGINT', onInt);
+    process.removeListener('SIGTERM', onTerm);
+    await cleanupRun();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +388,7 @@ function help() {
 commands
   doctor   [--clients a,b]          readiness of this machine (clients, secrets, API, run root)
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
-  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--keep]
+  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR]
   report   <runDir>                 re-render report.md from results.json
 

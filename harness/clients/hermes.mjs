@@ -43,7 +43,7 @@ export default {
   displayName: 'Hermes',
   os: ['darwin', 'linux'],
   binary: 'hermes',
-  install: { kind: 'uv-tool', pkg: PKG, version: process.env.MIDBRAIN_HARNESS_HERMES_VERSION || '', hint: 'installed run-locally with uv into <run>/tools' },
+  install: { kind: 'uv-tool', pkg: PKG, get version() { return process.env.MIDBRAIN_HARNESS_HERMES_VERSION || ''; }, hint: 'installed run-locally with uv into <run>/tools' },
   requiredSecrets: ['ANTHROPIC_API_KEY'],
   detectionFixtures: [{ path: '.hermes/.harness-keep', content: '' }],
   configShape: ['~/.hermes/config.yaml#hooks', '~/.hermes/config.yaml#mcp_servers', '~/.hermes/SOUL.md', '~/.midbrain/bin/hermes-hook'],
@@ -55,7 +55,7 @@ export default {
     'A running gateway must be restarted after setup (not applicable to one-shot chat runs).',
     'No transcript file exists; tool-call evidence comes from `hermes sessions export` and the hook log.',
   ],
-  options: { provider: process.env.MIDBRAIN_HARNESS_HERMES_PROVIDER || 'anthropic', model: process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5' },
+  get options() { return { provider: process.env.MIDBRAIN_HARNESS_HERMES_PROVIDER || 'anthropic', model: process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5' }; },
   specific: ['hook-acceptance'],
 
   clientEnv(ctx, { acceptHooks = true } = {}) {
@@ -98,8 +98,9 @@ export default {
   },
 
   async version(ctx) {
-    const r = await spawnCapture('hermes', ['--version'], { env: this.clientEnv(ctx), timeoutMs: 120000 });
-    return `${r.stdout}\n${r.stderr}`.trim().split('\n').pop() || null;
+    const python = path.join(ctx.dirs.tools, 'hermes/tools/hermes-agent/bin/python');
+    const r = await spawnCapture(python, ['-c', 'from importlib.metadata import version; print(version("hermes-agent"))'], { env: this.clientEnv(ctx), timeoutMs: 30000 });
+    return r.code === 0 ? r.stdout.trim() || null : null;
   },
 
   async hooksList(ctx) {

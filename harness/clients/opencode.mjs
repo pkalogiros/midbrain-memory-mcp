@@ -38,7 +38,7 @@ export default {
   displayName: 'OpenCode',
   os: ['darwin', 'linux', 'win32'],
   binary: 'opencode',
-  install: { kind: 'npm', pkg: PKG, version: process.env.MIDBRAIN_HARNESS_OPENCODE_VERSION || 'latest', hint: 'installed run-locally into <run>/tools' },
+  install: { kind: 'npm', pkg: PKG, get version() { return process.env.MIDBRAIN_HARNESS_OPENCODE_VERSION || 'latest'; }, hint: 'installed run-locally into <run>/tools' },
   requiredSecrets: ['ANTHROPIC_API_KEY'],
   // OpenCode creates opencode.jsonc itself on first run; pre-creating it keeps the
   // installer and the client on the same file.

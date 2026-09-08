@@ -124,10 +124,7 @@ export function sha256File(file) {
 export function packForRegistry(ctx, candidate, { version }) {
   const dir = path.join(ctx.dirs.run, 'registry', 'pack');
   mkdirSync(dir, { recursive: true });
-  const packed = spawnSync('npm', ['pack', '--pack-destination', dir, '--ignore-scripts', '--json'], { cwd: candidate.repoRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-  if (packed.status !== 0) throw new Error(`npm pack failed: ${packed.stderr.slice(-500)}`);
-  const info = JSON.parse(packed.stdout);
-  const original = path.join(dir, (Array.isArray(info) ? info[0] : info).filename);
+  const original = candidate.tarball;
   const originalSha = sha256File(original);
   if (version === candidate.version) {
     return { tarball: original, originalTarball: original, originalSha256: originalSha, publishedSha256: originalSha, version, rewritten: false };
@@ -207,6 +204,17 @@ export async function prepareRegistry(ctx, candidate, { publish = true } = {}) {
   const { version, exact } = await choosePublishVersion(candidate);
   const packed = packForRegistry(ctx, candidate, { version });
   candidate.registry = { url: registry.url, publishVersion: version, exact, published: false, ...packed };
+  // Inspection must load the same package version the clients will execute.
+  candidate.sourceVersion = candidate.version;
+  candidate.version = version;
+  candidate.tarball = packed.tarball;
+  candidate.tarballSha256 = packed.publishedSha256;
+  const packageFile = path.join(candidate.repoRoot, 'package.json');
+  const pkg = JSON.parse(readFileSync(packageFile, 'utf8'));
+  pkg.version = version;
+  writeFileSync(packageFile, JSON.stringify(pkg, null, 2) + '\n');
+  candidate.files['package.json'] = sha256File(packageFile);
+  ctx.writeJson(path.join(ctx.dirs.run, 'candidate/identity.json'), candidate);
   if (publish) await publishCandidate(ctx, candidate);
   return registry;
 }
