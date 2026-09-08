@@ -1,0 +1,112 @@
+// Throwaway home: detection fixtures, the pre-seeded global key (as a logged-in
+// user would have it), and the REAL installer run against the candidate.
+import path from 'node:path';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from 'node:fs';
+import { spawnCapture } from './proc.mjs';
+import { childEnv, HARNESS_DIR } from './context.mjs';
+
+export function seedDetectionFixtures(ctx, manifests) {
+  const written = [];
+  for (const m of manifests) {
+    for (const fx of m.detectionFixtures || []) {
+      const abs = path.join(ctx.dirs.home, fx.path);
+      mkdirSync(path.dirname(abs), { recursive: true });
+      if (!existsSync(abs)) {
+        writeFileSync(abs, fx.content ?? '');
+        written.push(abs);
+      }
+    }
+  }
+  return written;
+}
+
+export function writeGlobalKey(ctx, key) {
+  const dir = path.join(ctx.dirs.home, '.config', 'midbrain');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, '.midbrain-key');
+  writeFileSync(file, `${key.trim()}\n`, { mode: 0o600 });
+  return file;
+}
+
+export function writeGlobalHostConfig(ctx, apiUrl) {
+  if (!apiUrl) return null;
+  const dir = path.join(ctx.dirs.home, '.config', 'midbrain');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, 'config.json');
+  writeFileSync(file, `${JSON.stringify({ apiUrl }, null, 2)}\n`);
+  return file;
+}
+
+export function writeProjectKey(projectDir, key) {
+  const dir = path.join(projectDir, '.midbrain');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, '.midbrain-key');
+  writeFileSync(file, `${key.trim()}\n`, { mode: 0o600 });
+  return file;
+}
+
+export async function initProject(ctx, name) {
+  const dir = ctx.projectDir(name);
+  if (!existsSync(path.join(dir, '.git'))) {
+    await spawnCapture('git', ['init', '-q'], { cwd: dir, env: childEnv(ctx), timeoutMs: 20000 });
+  }
+  const readme = path.join(dir, 'README.md');
+  if (!existsSync(readme)) writeFileSync(readme, `# ${name}\n\nHarness project for run ${ctx.runId}.\n`);
+  return dir;
+}
+
+/**
+ * Run the product's installer against the candidate.
+ * dev mode:      node <checkout>/install.mjs --dev …   (clients point at the checkout)
+ * registry mode: npx -y <pkg>@latest install …          (resolved from the loopback registry)
+ */
+export async function installCandidate(ctx, candidate, { cwd, extraArgs = [], label = 'install-global' } = {}) {
+  let cmd;
+  let args;
+  if (candidate.mode === 'registry') {
+    cmd = 'npx';
+    args = ['-y', `${candidate.name}@latest`, 'install', '--non-interactive', '--no-login', ...extraArgs];
+  } else {
+    cmd = process.execPath;
+    args = [path.join(candidate.repoRoot, 'install.mjs'), '--dev', '--non-interactive', '--no-login', ...extraArgs];
+  }
+  const r = await spawnCapture(cmd, args, { cwd, env: childEnv(ctx), timeoutMs: 300000 });
+  const logDir = path.join(ctx.dirs.evidence, '_install');
+  mkdirSync(logDir, { recursive: true });
+  writeFileSync(path.join(logDir, `${label}.stdout.txt`), r.stdout);
+  writeFileSync(path.join(logDir, `${label}.stderr.txt`), r.stderr);
+  return r;
+}
+
+/** Ask the product's own adapters whether a client install is complete and fresh. */
+export async function inspectInstall(ctx, candidate, clientId) {
+  const script = path.join(HARNESS_DIR, 'lib', 'inspect-install.mjs');
+  const r = await spawnCapture(process.execPath, [script, candidate.repoRoot, clientId], {
+    cwd: ctx.dirs.run,
+    env: childEnv(ctx),
+    timeoutMs: 30000,
+  });
+  try {
+    return { ...JSON.parse(r.stdout.trim()), stderr: r.stderr.trim() };
+  } catch {
+    return { id: clientId, error: `inspect failed (exit ${r.code}): ${r.stderr.trim().slice(0, 300)}` };
+  }
+}
+
+/**
+ * Make the installed shim stale in a way the product's freshness check detects.
+ * Dev-marked shim bodies are never judged stale by design, so in dev mode the
+ * exec bit is removed (POSIX only); in registry mode the body is appended to.
+ */
+export function tamperShim(ctx, clientId, { mode = 'dev' } = {}) {
+  const file = path.join(ctx.dirs.home, '.midbrain', 'bin', `${clientId}-hook`);
+  if (!existsSync(file)) return null;
+  if (mode === 'dev') {
+    if (process.platform === 'win32') return { file, kind: 'unsupported' };
+    chmodSync(file, 0o644);
+    return { file, kind: 'exec-bit' };
+  }
+  const body = readFileSync(file, 'utf8');
+  if (!body.includes('# harness-tamper')) writeFileSync(file, `${body}\n# harness-tamper\n`);
+  return { file, kind: 'body' };
+}
