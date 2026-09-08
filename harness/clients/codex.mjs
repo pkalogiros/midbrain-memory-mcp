@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { spawnCapture, whichSync } from '../lib/proc.mjs';
 import { childEnv } from '../lib/context.mjs';
 import { BlockedError } from '../lib/checks.mjs';
@@ -113,6 +114,19 @@ export default {
       text += `\n${header}\ntrust_level = "trusted"\n`;
     }
     writeFileSync(cfg, text);
+  },
+
+  async approveHooks(ctx, project) {
+    if (!ctx.options.interactive || !process.stdin.isTTY) return null;
+    console.error('Approve only the three MidBrain hooks in /hooks, then exit Codex with /quit. The next turn verifies persisted approval without a bypass.');
+    const args = ['--no-alt-screen', '-C', project];
+    const model = (process.env.MIDBRAIN_HARNESS_CODEX_MODEL || '').trim();
+    if (model) args.push('-m', model);
+    return new Promise((resolve, reject) => {
+      const child = spawn('codex', args, { cwd: project, env: { ...this.clientEnv(ctx), TERM: 'xterm-256color' }, stdio: 'inherit' });
+      child.once('error', reject);
+      child.once('exit', code => resolve(code));
+    });
   },
 
   async runTurn({ ctx, project, prompt, sessionId, resume = false, evidenceDir, label = 'turn', hookTrust }) {

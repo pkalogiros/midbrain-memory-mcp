@@ -143,7 +143,16 @@ native and synchronous; there is no fallback hook replay.
 
 For the complete required matrix, use `run --mode registry --upgrade --required`.
 This rejects client/scenario subsets; FAIL, BLOCKED, and SKIP all exit nonzero.
-Codex persisted hook approval remains BLOCKED until its interactive `/hooks`
-before/after case is exercised: the installed CLI has no headless approval operation.
+Add `--interactive` when running in a terminal to complete Codex persisted hook
+approval. The harness first verifies capture is absent, opens Codex for `/hooks`
+approval, then verifies capture in a new process without the trust bypass. Approve
+only the three installed MidBrain hooks and exit with `/quit`. Without this flag,
+the approval cell remains BLOCKED. Claude cold-first-turn coverage creates a
+separate fresh home when the main home has already run an upgrade prelude.
+
+NanoClaw retains a per-group npm cache populated by its installer. Deployments
+using ephemeral homes need the same durable cache mount (`/home/node/.npm`) to
+avoid simultaneous cold npm installs by MCP and capture hooks. Upgrade validation
+explicitly clears each group's `_npx` resolution cache before checking the new version.
 Hermes acceptance, OpenCode capture without MCP, Claude hook order, and NanoClaw
 lifecycle have explicit cases. CI/release integration remains separate work.

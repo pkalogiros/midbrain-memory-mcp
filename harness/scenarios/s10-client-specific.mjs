@@ -1,10 +1,10 @@
 import path from 'node:path';
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { parse, modify, applyEdits } from 'jsonc-parser';
 import { check, captureCountChecks, recallChecks } from '../lib/checks.mjs';
 import { sleep } from '../lib/api.mjs';
-import { inspectInstall, tamperShim } from '../lib/home.mjs';
+import { inspectInstall, tamperShim, seedDetectionFixtures, writeGlobalKey, writeGlobalHostConfig, installCandidate } from '../lib/home.mjs';
 import { runTurn, readback, turnChecks, metadataChecks, grace, cell, relEvidence, sinceNow } from './_shared.mjs';
 
 async function selfRepairSmoke({ ctx, api, client, project, candidate, scenarioId }) {
@@ -39,11 +39,30 @@ async function selfRepairSmoke({ ctx, api, client, project, candidate, scenarioI
     checks });
 }
 
-async function coldFirstTurn({ ctx, client, scenarioId }) {
+async function coldFirstTurn({ ctx, api, client, candidate, scenarioId }) {
   const first = ctx.meta.firstTurn?.[client.id];
   const expected = 'The very first user message in a brand-new home (before any startup self-repair had run) is captured.';
   if (!first || ctx.turns.find(t => t.client === client.id)?.scenario !== 's01-capture') {
-    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, blockedReason: 'Cold-first-turn coverage requires s01-capture in a clean home without an upgrade prelude.' });
+    if (!candidate) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, blockedReason: 'A separate clean candidate install is required after an upgrade prelude.' });
+    const home = path.join(ctx.dirs.run, 'cold-home-' + client.id);
+    mkdirSync(home); // Existing state is an error: this case must really be cold.
+    const cold = { ...ctx, dirs: { ...ctx.dirs, home }, meta: {}, turns: [] };
+    const project = path.join(home, 'project');
+    mkdirSync(project);
+    seedDetectionFixtures(cold, [client]);
+    writeGlobalKey(cold, ctx.secrets.MIDBRAIN_HARNESS_API_KEY);
+    writeGlobalHostConfig(cold, api.base);
+    const installed = await installCandidate(cold, candidate, { cwd: project, label: 'cold-' + client.id });
+    const marker = ctx.subMarker(client.id, 'cold-first');
+    const since = sinceNow();
+    const t = await runTurn({ ctx: cold, client, project, prompt: `Reply with exactly ${marker}`, scenarioId, label: 'cold-first-turn' });
+    const rb = await readback(cold, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
+    const file = t.jsonPath.replace(/\.json$/, '.readback.json');
+    ctx.writeJson(file, rb);
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected,
+      evidence: [relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)], notes: 'Separate fresh home and npm cache; candidate installed after publication; no previous client turn.',
+      checks: [check('cold candidate installation succeeded', installed.code === 0), ...turnChecks(t), ...captureCountChecks(rb.rows, t),
+        ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId)] });
   }
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, notes: 'derived from s01-capture (first turn of the run)', checks: [
     check('opening user message captured on the cold first turn', first.userCaptured),
@@ -58,10 +77,23 @@ async function hookTrustPersisted({ ctx, api, client, project, scenarioId }) {
   const since = sinceNow();
   const t = await runTurn({ ctx, client, project, prompt, scenarioId, label: 'no-bypass', hookTrust: 'persisted' });
   const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
+  const file = t.jsonPath.replace(/\.json$/, '.readback.json');
+  ctx.writeJson(file, rb);
+  const evidence = [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)];
+  const checks = [...turnChecks(t), check('unapproved hooks produce no capture', rb.rows.length === 0 && rb.timedOut, `rows=${rb.rows.length}`)];
+  const approved = await client.approveHooks?.(ctx, project);
+  if (approved === null || approved === undefined) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected, evidence, checks,
+    blockedReason: 'Run with --interactive in a terminal to approve the installed MidBrain hooks through /hooks. Bypass is not persisted approval.' });
+  const afterMarker = m + '-approved';
+  const afterSince = sinceNow();
+  const after = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${afterMarker}`, scenarioId, label: 'after-approval', hookTrust: 'persisted' });
+  const observed = await readback(ctx, api, afterMarker, { sinceIso: afterSince, minUser: 1, minAssistant: 1 });
+  const afterFile = after.jsonPath.replace(/\.json$/, '.readback.json');
+  ctx.writeJson(afterFile, observed);
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected,
-    evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath)],
-    blockedReason: 'The installed Codex CLI exposes hooks/list but no headless persisted-approval operation. Before/after /hooks approval still requires an interactive test; bypass is not approval.',
-    checks: [...turnChecks(t), check('unapproved hooks produce no capture', !rb.lastError && rb.rows.length === 0, `rows=${rb.rows.length}`)] });
+    evidence: [...evidence, relEvidence(ctx, after.jsonPath), relEvidence(ctx, afterFile)],
+    checks: [...checks, check('interactive approval session exited successfully', approved === 0), ...turnChecks(after),
+      ...captureCountChecks(observed.rows, after), ...metadataChecks(observed.rows, client.expectedCaptureLabel, after.captureCwd, after.sessionId)] });
 }
 
 async function hookAcceptance({ ctx, api, client, project, scenarioId }) {

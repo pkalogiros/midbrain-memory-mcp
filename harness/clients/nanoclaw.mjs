@@ -24,6 +24,7 @@ export default {
   captureCwd: CAPTURE_CWD,
   capabilities: { userCapture: true, assistantCapture: true, toolCapture: false, sessionResume: true, deferredTools: true },
   knownExceptions: [
+    'The group retains its installer-populated npm cache across container wakes; upgrade validation explicitly clears its npx resolution cache.',
     'No separate PostToolUse capture; tool calls/results are collected from the native Claude transcript.',
     'The runner may request a formatting retry, producing multiple native assistant replies for one inbound message. Each native reply must be captured exactly once; duplicate or missing captures still fail.',
     'The local mailbox transport excludes Slack/WhatsApp delivery, OneCLI gateway provisioning, and host routing from this MCP integration lane.',
@@ -55,6 +56,7 @@ export default {
   },
 
   async afterInstall(ctx, { projects }) { await this.runtime(ctx).group(projects[0]); },
+  async clearNpxCache(ctx) { this.runtime(ctx).clearNpxCache(); },
   async installedVersion(ctx) { return this.runtime(ctx).installedVersion(); },
   async mcpList(ctx) { return this.runtime(ctx).probe(); },
   async runTurn(args) { return this.runtime(args.ctx).turn(args); },

@@ -37,6 +37,7 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
   await publishCandidate(ctx, candidate);
   ctx.writeJson(path.join(ctx.dirs.run, 'candidate.json'), candidate);
   const cacheExisted = clearNpxCache(ctx);
+  for (const client of clients) await client.clearNpxCache?.(ctx);
   const after = await npxVersion(ctx, candidate.name);
 
   for (const client of clients) {

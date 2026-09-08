@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 // messages, invokes capture hooks, or patches the runner/provider source.
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync, rmSync } from 'node:fs';
 import { spawnCapture } from './proc.mjs';
 import { BlockedError } from './checks.mjs';
 import { childEnv, HARNESS_DIR } from './context.mjs';
@@ -184,12 +184,12 @@ export class NanoClawRuntime {
     return ['--mount', 'type=bind,src=' + ownedMount(this.ctx.dirs.run, file) + ',dst=' + target + (readonly ? ',readonly' : '')];
   }
 
-  userArgs() {
+  userArgs(npmCache) {
     const uid = process.getuid?.() || 1000;
     const gid = process.getgid?.() || 1000;
     // Keep host-mounted files owned by the invoking user. All unmounted home
     // state is ephemeral and writable by that uid, including the legacy shim.
-    return ['--user', `${uid}:${gid}`, '--tmpfs', `/home/node:exec,uid=${uid},gid=${gid},mode=0700`, '-e', 'HOME=/home/node'];
+    return ['--user', `${uid}:${gid}`, '--tmpfs', `/home/node:exec,uid=${uid},gid=${gid},mode=0700`, '-e', 'HOME=/home/node', ...(npmCache ? this.mount(npmCache, '/home/node/.npm') : [])];
   }
 
   networkArgs() {
@@ -214,7 +214,9 @@ export class NanoClawRuntime {
     // binding without overwriting host-client instructions or local memories.
     const agent = path.join(dir, 'agent');
     const logs = path.join(dir, 'logs');
-    for (const d of [claude, agent, logs, path.join(claude, '.midbrain')]) mkdirSync(d, { recursive: true, mode: 0o777 });
+    // Preserve the installer-populated npm cache across container wakes.
+    const npm = path.join(dir, 'npm');
+    for (const d of [claude, agent, logs, npm, path.join(claude, '.midbrain')]) mkdirSync(d, { recursive: true, mode: 0o777 });
     const state = path.join(claude, '.midbrain');
     // Same group setup surfaces as /add-midbrain. File credentials are bound
     // to the custom API in the durable state, also visible to stripped hooks.
@@ -235,9 +237,9 @@ export class NanoClawRuntime {
     await rules.writeAgentRules(path.join(agent, 'CLAUDE.md'), { client: 'nanoclaw' });
     const instructions = path.join(dir, 'instructions.prepend.md');
     writeFileSync(instructions, 'For requests to reply exactly, put that exact text inside the required <message to="harness"> delivery wrapper.\n');
-    group = { id, dir, claude, agent, logs, envFile, key, config, instructions };
+    group = { id, dir, claude, agent, logs, npm, envFile, key, config, instructions };
     const setupArgs = this.candidate.mode === 'dev' ? ['node', PACKAGE + '/install.mjs', '--dev'] : ['npx', '-y', 'midbrain-memory-mcp@latest', 'install'];
-    const setup = await this.oneShot([...this.userArgs(), ...this.networkArgs(), ...this.mount(claude, '/home/node/.claude'), ...this.mount(agent, CAPTURE_CWD), ...this.mount(logs, '/workspace/logs'), ...this.mount(logs, '/home/node/.local/state/midbrain'), '-e', 'MIDBRAIN_STATE_DIR=' + STATE, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', setupArgs[0], this.image, ...setupArgs.slice(1), '--non-interactive', '--no-login']);
+    const setup = await this.oneShot([...this.userArgs(npm), ...this.networkArgs(), ...this.mount(claude, '/home/node/.claude'), ...this.mount(agent, CAPTURE_CWD), ...this.mount(logs, '/workspace/logs'), ...this.mount(logs, '/home/node/.local/state/midbrain'), '-e', 'MIDBRAIN_STATE_DIR=' + STATE, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', setupArgs[0], this.image, ...setupArgs.slice(1), '--non-interactive', '--no-login']);
     writeFileSync(path.join(dir, 'setup.log'), this.redact(setup.stdout + setup.stderr));
     this.groups.set(project, group);
     return group;
@@ -273,7 +275,7 @@ export class NanoClawRuntime {
     let mailboxError = '';
     this.containers.add(container);
     try {
-      await this.checkedDocker(['run', '-d', ...this.userArgs(), '--name', container, '--label', 'dev.midbrain.harness.run=' + this.ctx.runId, '--init', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '2g', ...this.networkArgs(), ...this.mount(session.dir, '/workspace'), ...this.mount(path.join(session.dir, 'inbound.db'), '/workspace/inbound.db', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.instructions, CAPTURE_CWD + '/instructions.prepend.md', true), ...this.mount(path.join(group.agent, 'container.json'), CAPTURE_CWD + '/container.json', true), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.mount(path.join(this.root, 'container/agent-runner/src'), '/app/src', true), '--env-file', group.envFile, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', 'bun', this.image, 'run', '/app/src/index.ts']);
+      await this.checkedDocker(['run', '-d', ...this.userArgs(group.npm), '--name', container, '--label', 'dev.midbrain.harness.run=' + this.ctx.runId, '--init', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '2g', ...this.networkArgs(), ...this.mount(session.dir, '/workspace'), ...this.mount(path.join(session.dir, 'inbound.db'), '/workspace/inbound.db', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.instructions, CAPTURE_CWD + '/instructions.prepend.md', true), ...this.mount(path.join(group.agent, 'container.json'), CAPTURE_CWD + '/container.json', true), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.mount(path.join(this.root, 'container/agent-runner/src'), '/app/src', true), '--env-file', group.envFile, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', 'bun', this.image, 'run', '/app/src/index.ts']);
       const deadline = started + Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
       while (Date.now() < deadline) {
         try { snapshot = await readMailbox(session.dir, inboundId); } catch (e) {
@@ -320,8 +322,13 @@ export class NanoClawRuntime {
     return { client: 'nanoclaw', sessionId: sid, nanoSessionId: session.id, containerId: container, inboundId, prompt, finalText: this.redact(selectReply(snapshot.messages, inboundId)), toolCalls: parsed.toolCalls, nativeAssistantMessages: parsed.nativeAssistantMessages, init: null, exitCode, timedOut, isError: snapshot.ack !== 'completed' || !transcript || !parsed.sessionId, durationMs: Date.now() - started, rawPath, stderr: timedOut ? mailboxError : '', nativeCapture: true, evidenceDir };
   }
 
+  clearNpxCache() {
+    for (const group of this.groups.values()) rmSync(path.join(group.npm, '_npx'), { recursive: true, force: true });
+  }
+
   async installedVersion() {
-    const r = await this.oneShot([...this.userArgs(), ...this.networkArgs(), ...this.registryEnv(), '--entrypoint', 'npx', this.image, '-y', 'midbrain-memory-mcp@latest', '--version']);
+    const group = [...this.groups.values()][0];
+    const r = await this.oneShot([...this.userArgs(group?.npm), ...this.networkArgs(), ...this.registryEnv(), '--entrypoint', 'npx', this.image, '-y', 'midbrain-memory-mcp@latest', '--version']);
     return r.stdout.trim();
   }
 
@@ -330,7 +337,7 @@ export class NanoClawRuntime {
     if (!group) return { code: 1, connected: false, text: 'No configured NanoClaw group' };
     const probe = path.join(this.ctx.dirs.tools, 'nanoclaw-probe.mjs');
     cpSync(path.join(HARNESS_DIR, 'container/nanoclaw-probe.mjs'), probe);
-    const r = await this.oneShot([...this.userArgs(), ...this.networkArgs(), ...this.mount(probe, '/probe.mjs', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.registryEnv(), '--entrypoint', 'node', this.image, '/probe.mjs'], { checked: false });
+    const r = await this.oneShot([...this.userArgs(group.npm), ...this.networkArgs(), ...this.mount(probe, '/probe.mjs', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.registryEnv(), '--entrypoint', 'node', this.image, '/probe.mjs'], { checked: false });
     writeFileSync(path.join(this.ctx.dirs.evidence, 'nanoclaw-mcp-probe.log'), this.redact(r.stdout + r.stderr));
     let tools = [];
     try { tools = JSON.parse(r.stdout.trim()).tools; } catch { /* failed probe */ }

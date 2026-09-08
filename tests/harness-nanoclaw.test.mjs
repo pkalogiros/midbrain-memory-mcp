@@ -48,13 +48,21 @@ describe('NanoClaw isolation', () => {
     const runtime = new NanoClawRuntime(ctx, { mode: 'dev', repoRoot: fileURLToPath(new URL('../', import.meta.url)) });
     mkdirSync(path.join(runtime.root, 'container'), { recursive: true });
     writeFileSync(path.join(runtime.root, 'container/CLAUDE.md'), 'NanoClaw agent instructions');
-    runtime.oneShot = async () => ({ stdout: '', stderr: '' });
+    const commands = [];
+    runtime.oneShot = async args => { commands.push(args); return { stdout: '', stderr: '' }; };
     try {
       const group = await runtime.group(project);
       expect(readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toBe('Host project instructions');
       expect(group.agent).not.toBe(project);
       expect(readFileSync(path.join(group.agent, 'CLAUDE.md'), 'utf8')).toContain('NanoClaw agent instructions');
       expect(group.key).toBe('project-key');
+      expect(commands[0].join(' ')).toContain('dst=/home/node/.npm');
+      mkdirSync(path.join(group.npm, '_npx'), { recursive: true });
+      writeFileSync(path.join(group.npm, '_npx', 'old-package'), 'old');
+      writeFileSync(path.join(group.npm, 'keep'), 'cached tarballs');
+      runtime.clearNpxCache();
+      expect(() => readFileSync(path.join(group.npm, '_npx', 'old-package'))).toThrow();
+      expect(readFileSync(path.join(group.npm, 'keep'), 'utf8')).toBe('cached tarballs');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
   it('translates loopback URLs without losing API paths or registry ports', () => {

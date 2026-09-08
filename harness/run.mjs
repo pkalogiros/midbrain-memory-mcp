@@ -161,6 +161,7 @@ async function run(flags) {
       pollIntervalMs: num(flags['poll-interval-ms'], 5000),
       keep: Boolean(flags.keep),
       required: Boolean(flags.required),
+      interactive: Boolean(flags.interactive),
       upgrade,
     },
   });
