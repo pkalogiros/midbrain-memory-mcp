@@ -564,6 +564,10 @@ guards the mechanism).
   primer; use it only when the user signals session/client continuity or
   recent-session metadata is itself needed, then perform targeted search/date
   recall.
+- Recall from MidBrain before reading local files, including local memory files.
+  Local memory is supplementary and must not precede MidBrain recall.
+- Keep the complete ID, including every suffix, in one query. Do not split an ID
+  into separate searches or search only its shared prefix.
 - Use recovered context. Refine irrelevant or incomplete results before acting
   and recall again only for a new material target.
 - Tools: `memory_search(all)` for broad context; episodic search for prior

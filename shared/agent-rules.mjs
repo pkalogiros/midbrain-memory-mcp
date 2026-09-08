@@ -46,6 +46,10 @@ const RULES_BLOCK_BODY = `\
   primer; use it only when the user signals session/client continuity or
   recent-session metadata is itself needed, then perform targeted search/date
   recall.
+- Recall from MidBrain before reading local files, including local memory files.
+  Local memory is supplementary and must not precede MidBrain recall.
+- Keep the complete ID, including every suffix, in one query. Do not split an ID
+  into separate searches or search only its shared prefix.
 - Use recovered context. Refine irrelevant or incomplete results before acting
   and recall again only for a new material target.
 - Tools: \`memory_search(all)\` for broad context; episodic search for prior
@@ -127,6 +131,12 @@ const LEGACY_RULES_BLOCKS = LEGACY_RULES_BODIES.map(
 // Hashes let us migrate known generated output without matching or deleting
 // user-authored MidBrain prose. Any user edit changes the hash and is preserved.
 const RECOGNIZED_MANAGED_BLOCK_HASHES = new Set([
+  'ed69a26cea711deafd14f2c779243776560c556a92f9415cb15fda0d83be8a91',
+  'e188458fabb3eb6d170d26b1d8f11418aa4ccc627356f6f1ebf9e96421e77791',
+  '8b9884eed487536976718f5ad6e814d7bb971ed9cbfe64ac080b43ba50ff20c3',
+  '9e285b96857970c2255cacecc5e20f66687267bb52be3ef49070bb7cb13be8d0',
+  '8b7bef1c0d8981c5810600438da4848bde52736f6ae93263b5a0da5ceb0f1a17',
+
   'a7bc02935caf2ba8ac3225d2255a2783e9e69e6e24cdd3a07622c5de99e7',
   'b291ef0e795a38f42061fde07152f907454f47e88ffd7b3d80b33d56fbf38c78',
   'b3daa1470cabc89f7401bde1efa29b942514f2df90c24d1fdc663df318dd14cb',

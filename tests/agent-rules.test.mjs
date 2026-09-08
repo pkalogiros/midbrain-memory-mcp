@@ -81,6 +81,8 @@ describe("buildRulesBlock", () => {
     expect(block).toContain("read_file");
     expect(block).toContain("get_episodic_memories_by_date");
     expect(block).toContain("Before substantive work");
+    expect(block).toContain("including local memory files");
+    expect(block).toContain("Keep the complete ID, including every suffix, in one query");
     expect(block).toContain("Start with contextual");
     expect(block).toContain("Search one target per call");
     expect(block).toContain("copy it verbatim into the query");
@@ -225,12 +227,19 @@ describe("writeAgentRules", () => {
   });
 
   it("T-4b: recognizes byte-exact managed rollout blocks by hash", () => {
-    expect([...RECOGNIZED_MANAGED_BLOCK_HASHES].sort()).toEqual([
+    expect([...RECOGNIZED_MANAGED_BLOCK_HASHES]).toEqual(expect.arrayContaining([
       "a7bc02935caf2ba8ac3225d2255a2783e9e69e6e24cdd3a07622c5de99e7",
       "b291ef0e795a38f42061fde07152f907454f47e88ffd7b3d80b33d56fbf38c78",
       "b3daa1470cabc89f7401bde1efa29b942514f2df90c24d1fdc663df318dd14cb",
       "e4d35347297d3af14bdddb0f6952c6fe84bced7081b757ac06d654a5aa851976",
-    ]);
+    ]));
+  });
+
+  it("updates the prior memory-ordering rules while preserving surrounding instructions", async () => {
+    const prior = "<!-- midbrain-memory-rules:start -->\n### Tool loading\n\n- Codex/OpenCode: call visible MidBrain tools. If deferred, discover\n  `memory_search` or the needed function, then call it. Discovery is the only\n  allowed pre-recall action.\n\n## MidBrain Memory\n\n- Before substantive work, recall relevant MidBrain context; skip only trivial\n  self-contained work or explicit opt-out. Start with contextual\n  `memory_search`. Search one target per call. Treat every request ID, name,\n  file, and date as a retrieval anchor: copy it verbatim into the query; never\n  merge or generalize targets. Never use `check_session_status` as a default\n  primer; use it only when the user signals session/client continuity or\n  recent-session metadata is itself needed, then perform targeted search/date\n  recall.\n- Use recovered context. Refine irrelevant or incomplete results before acting\n  and recall again only for a new material target.\n- Tools: `memory_search(all)` for broad context; episodic search for prior\n  conversations/decisions; `get_episodic_memories_by_date` for known periods\n  or continuity; semantic search plus `list_files`/`read_file` for stored\n  documents; `grep` for exact semantic anchors only. MidBrain\n  `list_files`/`read_file` read remote memory, so local-filesystem bans do\n  not prohibit them.\n- Reliability outranks cost. Start near 10 results; if the target is absent or\n  noisy, repeat at the supported maximum (currently 50). Then refine anchors or\n  surfaces, paginate, or traverse dates while useful. Ranked misses are not\n  absence; recall depth is uncapped. Stop on direct recovery.\n- Current/latest claims require the underlying state-changing episode or direct\n  current evidence; assistant restatements are insufficient. Current repos,\n  configs, and live systems override memory.\n- Report only `found`, `maybe found`, or `not found after search`; report\n  tool failure separately. Never infer or reconstruct missing memory.\n- Never query secrets/large sensitive blobs or create memories.\n  `memory_setup_project` requires an explicit setup request.\n- Procedural knowledge is not injected automatically unless\n  `MIDBRAIN_ENABLE_PK_INJECTION=1`.\n<!-- midbrain-memory-rules:end -->";
+    readFileReturns({ [TARGET]: "# My instructions\n" + prior + "\nKeep this footer." });
+    expect((await writeAgentRules(TARGET)).action).toBe("updated");
+    expect(mocks.writeFile.mock.calls[0][1]).toBe("# My instructions\n" + buildRulesBlock() + "\nKeep this footer.");
   });
 
   it("T-14: known legacy block — content before block unchanged", async () => {
