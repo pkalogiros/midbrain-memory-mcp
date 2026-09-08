@@ -210,7 +210,9 @@ export class NanoClawRuntime {
     const id = randomUUID();
     const dir = path.join(this.root, 'data/v2-sessions', id);
     const claude = path.join(dir, '.claude-shared');
-    const agent = project;
+    // A NanoClaw group owns its agent files; it shares the project's memory
+    // binding without overwriting host-client instructions or local memories.
+    const agent = path.join(dir, 'agent');
     const logs = path.join(dir, 'logs');
     for (const d of [claude, agent, logs, path.join(claude, '.midbrain')]) mkdirSync(d, { recursive: true, mode: 0o777 });
     const state = path.join(claude, '.midbrain');

@@ -414,6 +414,10 @@ validate Slack/WhatsApp, the full NanoClaw host dispatcher, OneCLI provisioning,
 providers. Its behavioral CI/release scheduling and Linux validation remain to be wired and
 verified; the implementation alone is not evidence of five-client release parity.
 
+Each NanoClaw group has its own agent workspace. It uses the selected project's
+memory credential without replacing the host project's instructions or sharing
+client-local memory files with Claude, Codex, OpenCode, or Hermes.
+
 ## Release review for the hardening changes
 
 Two product changes require Radu's release review; passing harness checks do not grant that approval:

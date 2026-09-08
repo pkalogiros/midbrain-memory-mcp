@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { containerUrl, parseTranscript, selectReply, ownedMount, dockerEnv } from '../harness/lib/nanoclaw.mjs';
@@ -36,6 +36,26 @@ describe('NanoClaw evidence', () => {
 });
 
 describe('NanoClaw isolation', () => {
+  it('keeps agent instructions separate from host projects while preserving their memory binding', async () => {
+    const { NanoClawRuntime } = await import('../harness/lib/nanoclaw.mjs');
+    const root = mkdtempSync(path.join(os.tmpdir(), 'nano-workspace-'));
+    const home = path.join(root, 'home'), project = path.join(home, 'project');
+    mkdirSync(path.join(project, '.midbrain'), { recursive: true });
+    writeFileSync(path.join(project, 'CLAUDE.md'), 'Host project instructions');
+    writeFileSync(path.join(project, '.midbrain/.midbrain-key'), 'project-key');
+    const ctx = { dirs: { run: root, home }, secrets: { MIDBRAIN_HARNESS_API_KEY: 'global-key', ANTHROPIC_API_KEY: 'test-provider-key' } };
+    const runtime = new NanoClawRuntime(ctx, { mode: 'dev', repoRoot: new URL('../', import.meta.url).pathname });
+    mkdirSync(path.join(runtime.root, 'container'), { recursive: true });
+    writeFileSync(path.join(runtime.root, 'container/CLAUDE.md'), 'NanoClaw agent instructions');
+    runtime.oneShot = async () => ({ stdout: '', stderr: '' });
+    try {
+      const group = await runtime.group(project);
+      expect(readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toBe('Host project instructions');
+      expect(group.agent).not.toBe(project);
+      expect(readFileSync(path.join(group.agent, 'CLAUDE.md'), 'utf8')).toContain('NanoClaw agent instructions');
+      expect(group.key).toBe('project-key');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it('translates loopback URLs without losing API paths or registry ports', () => {
     expect(containerUrl('http://127.0.0.1:8000/api/')).toBe('http://host.docker.internal:8000/api/');
     expect(containerUrl('https://memory.midbrain.ai')).toBe('https://memory.midbrain.ai/');
