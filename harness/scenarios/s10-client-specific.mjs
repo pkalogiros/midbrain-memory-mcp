@@ -42,7 +42,9 @@ async function selfRepairSmoke({ ctx, api, client, project, candidate, scenarioI
 async function coldFirstTurn({ ctx, client, scenarioId }) {
   const first = ctx.meta.firstTurn?.[client.id];
   const expected = 'The very first user message in a brand-new home (before any startup self-repair had run) is captured.';
-  if (!first) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, blockedReason: 's01-capture did not run first for this client' });
+  if (!first || ctx.turns.find(t => t.client === client.id)?.scenario !== 's01-capture') {
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, blockedReason: 'Cold-first-turn coverage requires s01-capture in a clean home without an upgrade prelude.' });
+  }
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, notes: 'derived from s01-capture (first turn of the run)', checks: [
     check('opening user message captured on the cold first turn', first.userCaptured),
     check('assistant reply captured on the cold first turn', first.assistantCaptured),

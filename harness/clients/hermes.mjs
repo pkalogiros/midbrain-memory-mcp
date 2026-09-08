@@ -10,7 +10,7 @@ import { childEnv } from '../lib/context.mjs';
 import { BlockedError } from '../lib/checks.mjs';
 
 const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
-const PKG = 'hermes-agent';
+const PKG = 'hermes-agent[mcp]';
 const SESSION_RE = /\b(session[_ -]?id|session)\b[^A-Za-z0-9_-]{0,6}([A-Za-z0-9_-]{8,})/i;
 
 export function parseSessionExport(jsonl, prompt) {

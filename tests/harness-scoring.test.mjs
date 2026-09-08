@@ -6,6 +6,18 @@ import { HarnessApi } from '../harness/lib/api.mjs';
 const turn = (result, ok = true) => ({ finalText: 'VALUE-secret', toolCalls: [{ name: 'midbrain__memory_search', input: { query: 'TASK' }, result, ok }] });
 const passed = checks => checks.every(c => c.ok);
 
+it('does not label post-upgrade capture as a cold first turn', async () => {
+  const { default: scenario } = await import('../harness/scenarios/s10-client-specific.mjs');
+  const client = { id: 'claude', specific: ['cold-first-turn'] };
+  const ctx = { meta: { firstTurn: { claude: { userCaptured: true, assistantCaptured: true } } }, turns: [
+    { client: 'claude', scenario: 's09-upgrade-continuity' },
+    { client: 'claude', scenario: 's01-capture' },
+  ] };
+  expect((await scenario.run({ ctx, client }))[0].status).toBe('BLOCKED');
+  ctx.turns.shift();
+  expect((await scenario.run({ ctx, client }))[0].status).toBe('PASS');
+});
+
 describe('evidence-based scoring', () => {
   it('rejects an answer without successful retrieval of the hidden value', () => {
     expect(passed(recallChecks(turn('reader question TASK'), 'TASK', ['VALUE-secret']))).toBe(false);

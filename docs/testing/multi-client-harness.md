@@ -158,13 +158,17 @@ export default {
 | Claude Code | `claude -p <prompt> --output-format stream-json --verbose --session-id <uuid>`; fresh session = new uuid; continued = `--resume <uuid>` | `session_id` in Stop payload = the uuid | stream-json NDJSON (`system/init` lists MCP servers + tools; `assistant`/`user` messages carry `tool_use`/`tool_result`; `result` carries final text); transcript `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<uuid>.jsonl` |
 | Codex | `codex exec --json --skip-git-repo-check -C <project> -o <file> [--dangerously-bypass-hook-trust] <prompt>`; continued = `codex exec resume <thread> <prompt>` | `thread.started.thread_id` | JSONL items (`mcp_tool_call`, `agent_message`, `command_execution`); `$TMPDIR/midbrain-codex-{assistant-turns,tool-events}/<session>/<turn>/` receipts |
 | OpenCode | run-local install of `opencode-ai` into `<run>/tools`; `opencode run --format json --dir <project> [-s <session>]`; `opencode mcp list` proves the MCP connection without a model call | session id present on every JSON event | `opencode export <sessionID>` (messages + parts incl. tool state); plugin log `midbrain-opencode.log`; sqlite db |
-| Hermes | run-local `uv tool install hermes-agent`; `hermes chat -q <prompt> -Q --provider anthropic -m <model> [--resume <id>]` with `HERMES_ACCEPT_HOOKS=1`; `hermes hooks list` shows consent state, `hermes mcp list` the server | session id from `-Q` output or `hermes sessions list` | `hermes sessions export --format jsonl`; `shell-hooks-allowlist.json`; `midbrain-hermes.log` |
+| Hermes | run-local `uv tool install 'hermes-agent[mcp]'`; `hermes chat -q <prompt> -Q --provider anthropic -m <model> [--resume <id>]` with `HERMES_ACCEPT_HOOKS=1`; `hermes hooks list` shows consent state, `hermes mcp list` the server | session id from `-Q` output or `hermes sessions list` | `hermes sessions export --format jsonl`; `shell-hooks-allowlist.json`; `midbrain-hermes.log` |
 | NanoClaw | Docker required; group container with `.claude-shared/settings.json` merge (driver: phase 3) | Stop payload `session_id` | transcript under `/home/node/.claude/projects`, spool/receipt files |
 
 Hermes's run-owned config sets `mcp_discovery_timeout: 30` so cold npx startup
 can finish before its first tool snapshot (Hermes 0.19 defaults to 1.5 seconds).
 The export reader accepts nested session envelopes and flat JSONL messages;
 only the current turn's successful tool calls count as recall evidence.
+
+Cold-first-turn coverage requires a separate clean-home run without `--upgrade`.
+An upgrade prelude has already started client sessions before S1, so that case
+is reported as blocked rather than credited as a cold start.
 
 All children receive a **scrubbed env**: `HOME`/`USERPROFILE` → run home; `TMPDIR`/`TEMP`/`TMP`
 → `<run>/tmp`; `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME`, `npm_config_cache` inside the
