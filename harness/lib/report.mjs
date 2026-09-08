@@ -50,6 +50,7 @@ export function renderMarkdown(results) {
   lines.push('');
   lines.push('| Field | Value |');
   lines.push('|---|---|');
+  lines.push(`| Run type | ${run.required ? 'Required matrix' : 'Focused validation'} |`);
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
   if (candidate.pack && !candidate.pack.error) lines.push(`| Source archive | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);
   if (candidate.tarballSha256) lines.push(`| Tested archive SHA-256 | ${candidate.tarballSha256} |`);

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { containerUrl, parseTranscript, selectReply, ownedMount, dockerEnv } from '../harness/lib/nanoclaw.mjs';
 import { metadataChecks } from '../harness/scenarios/_shared.mjs';
 import { runExitCode } from '../harness/lib/checks.mjs';
@@ -44,7 +45,7 @@ describe('NanoClaw isolation', () => {
     writeFileSync(path.join(project, 'CLAUDE.md'), 'Host project instructions');
     writeFileSync(path.join(project, '.midbrain/.midbrain-key'), 'project-key');
     const ctx = { dirs: { run: root, home }, secrets: { MIDBRAIN_HARNESS_API_KEY: 'global-key', ANTHROPIC_API_KEY: 'test-provider-key' } };
-    const runtime = new NanoClawRuntime(ctx, { mode: 'dev', repoRoot: new URL('../', import.meta.url).pathname });
+    const runtime = new NanoClawRuntime(ctx, { mode: 'dev', repoRoot: fileURLToPath(new URL('../', import.meta.url)) });
     mkdirSync(path.join(runtime.root, 'container'), { recursive: true });
     writeFileSync(path.join(runtime.root, 'container/CLAUDE.md'), 'NanoClaw agent instructions');
     runtime.oneShot = async () => ({ stdout: '', stderr: '' });
