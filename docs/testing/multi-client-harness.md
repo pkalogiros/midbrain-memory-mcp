@@ -166,6 +166,12 @@ can finish before its first tool snapshot (Hermes 0.19 defaults to 1.5 seconds).
 The export reader accepts nested session envelopes and flat JSONL messages;
 only the current turn's successful tool calls count as recall evidence.
 
+OpenCode uses its current-turn JSON stream for answers and tool calls; session
+exports remain supporting artifacts. When native MCP metadata identifies a truncated
+response, the adapter retains the complete file from the run's OpenCode tool-output
+directory for scoring. A truncated export cannot erase current-turn evidence or
+credit calls from an earlier resumed turn.
+
 Cold-first-turn coverage requires a separate clean-home run without `--upgrade`.
 An upgrade prelude has already started client sessions before S1, so that case
 is reported as blocked rather than credited as a cold start.

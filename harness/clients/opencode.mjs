@@ -1,9 +1,9 @@
 // OpenCode manifest + driver. OpenCode is installed run-locally (npm prefix
 // under <run>/tools) so the client version is pinned per run. Sessions run via
-// `opencode run --format json`; the authoritative evidence is `opencode export
-// <sessionID>` (messages + parts, including tool calls and results).
+// `opencode run --format json`; its current-turn stream is authoritative.
+// Session exports are retained separately and can include older resumed turns.
 import path from 'node:path';
-import { existsSync, mkdirSync, symlinkSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, readFileSync, writeFileSync, rmSync, realpathSync, statSync } from 'node:fs';
 import { spawnCapture, whichSync } from '../lib/proc.mjs';
 import { childEnv } from '../lib/context.mjs';
 import { BlockedError } from '../lib/checks.mjs';
@@ -11,26 +11,24 @@ import { BlockedError } from '../lib/checks.mjs';
 const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
 const PKG = 'opencode-ai';
 
-function extractParts(exported) {
-  const messages = Array.isArray(exported?.messages) ? exported.messages : [];
-  const toolCalls = [];
-  let finalText = '';
-  for (const msg of messages) {
-    const role = msg?.info?.role || msg?.role;
-    const parts = Array.isArray(msg?.parts) ? msg.parts : [];
-    if (role !== 'assistant') continue;
-    let text = '';
-    for (const p of parts) {
-      if (p.type === 'tool') {
-        const st = p.state || {};
-        toolCalls.push({ id: p.id || p.callID, name: p.tool, server: /midbrain/i.test(String(p.tool)) ? 'midbrain-memory' : undefined, input: st.input ?? null, result: st.output ?? st.error ?? null, ok: st.status ? st.status === 'completed' : !st.error });
-      } else if (p.type === 'text' && typeof p.text === 'string') {
-        text += (text ? '\n' : '') + p.text;
-      }
-    }
-    if (text) finalText = text;
+export function toolCall(part, ctx, evidenceDir, label) {
+  const state = part.state || {};
+  const call = { id: part.callID || part.id, name: part.tool, server: /midbrain/i.test(String(part.tool)) ? 'midbrain-memory' : undefined,
+    input: state.input ?? null, result: state.output ?? state.error ?? null, ok: state.status === 'completed' };
+  // Native metadata links truncated MCP responses to their complete output file.
+  if (call.ok && call.server && state.metadata?.truncated && state.metadata.outputPath) {
+    try {
+      const file = realpathSync(state.metadata.outputPath);
+      const allowed = path.join(realpathSync(ctx.dirs.home), '.local/share/opencode/tool-output');
+      if (path.dirname(file) !== allowed || !statSync(file).isFile() || statSync(file).size > 8 * 1024 * 1024) throw new Error('MCP output must be a run-owned OpenCode tool file under 8 MiB');
+      const result = readFileSync(file, 'utf8');
+      const resultPath = path.join(evidenceDir, `${label}.${path.basename(file)}.txt`);
+      writeFileSync(resultPath, result, { mode: 0o600 });
+      call.result = result;
+      call.resultPath = resultPath;
+    } catch (e) { call.evidenceError = e.message; }
   }
-  return { toolCalls, finalText };
+  return call;
 }
 
 export default {
@@ -101,6 +99,8 @@ export default {
       exitCode: null, durationMs: 0, rawPath, stderr: '', isError: false, timedOut: false,
     };
     let streamText = '';
+    let messageId;
+    const streamTools = new Map();
     const r = await spawnCapture('opencode', args, {
       cwd: project,
       env: this.clientEnv(ctx),
@@ -112,13 +112,23 @@ export default {
         const sid = ev.sessionID || ev.properties?.sessionID || ev.properties?.info?.sessionID || ev.part?.sessionID;
         if (sid && !turn.sessionId) turn.sessionId = sid;
         if (ev.type === 'error') { turn.isError = true; turn.errorDetail = JSON.stringify(ev.error || ev).slice(0, 500); }
-        if (ev.type === 'text' && typeof ev.part?.text === 'string') streamText += ev.part.text;
+        if (ev.type === 'text' && typeof ev.part?.text === 'string') {
+          if (ev.part.messageID !== messageId) streamText = '';
+          messageId = ev.part.messageID;
+          streamText += ev.part.text;
+        }
+        if (ev.type === 'tool_use' && ev.part?.type === 'tool') {
+          const call = toolCall(ev.part, ctx, evidenceDir, label);
+          streamTools.set(call.id, call);
+        }
       },
     });
     turn.exitCode = r.code;
     turn.durationMs = r.durationMs;
     turn.stderr = r.stderr.slice(-4000);
     turn.timedOut = r.timedOut;
+    turn.finalText = streamText;
+    turn.toolCalls = [...streamTools.values()];
     if (turn.sessionId) {
       const exp = await spawnCapture('opencode', ['export', turn.sessionId], { cwd: project, env: this.clientEnv(ctx), timeoutMs: 60000 });
       if (exp.code === 0 && exp.stdout.trim()) {
@@ -126,19 +136,13 @@ export default {
         writeFileSync(exportPath, exp.stdout);
         turn.exportPath = exportPath;
         try {
-          const parsed = extractParts(JSON.parse(exp.stdout));
-          turn.toolCalls = parsed.toolCalls;
-          turn.finalText = parsed.finalText || streamText;
+          JSON.parse(exp.stdout);
         } catch (e) {
           turn.exportError = e.message;
-          turn.finalText = streamText;
         }
       } else {
         turn.exportError = exp.stderr.trim().slice(-300);
-        turn.finalText = streamText;
       }
-    } else {
-      turn.finalText = streamText;
     }
     return turn;
   },
