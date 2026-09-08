@@ -219,3 +219,12 @@ export function deliveredNanoclawMessage(rows) {
   }
   return delivered;
 }
+
+/** Remove the runner's envelope, preserving literal user text with one decode. */
+export function nanoclawUserText(text) {
+  if (typeof text !== "string") return text;
+  const match = text.match(/^<context\s+[^<>]*\/>\s*<message id="[^"<>]*" from="[^"<>]*" sender="[^"<>]*" time="[^"<>]*">([^<>]*)<\/message>$/s);
+  if (!match) return text;
+  const entities = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"' };
+  return match[1].replace(/&(?:amp|lt|gt|quot);/g, entity => entities[entity]);
+}

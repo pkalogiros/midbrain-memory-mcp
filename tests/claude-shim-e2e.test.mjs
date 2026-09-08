@@ -105,6 +105,20 @@ describe.skipIf(IS_WIN)("AC-9 — claude-hook shim end-to-end (sandboxed)", () =
     expect(JSON.stringify(episodic[0].body)).toContain("claude");
   });
 
+  it("NanoClaw user capture preserves literal text instead of XML transport escaping", async () => {
+    await fs.mkdir(path.join(env.home, ".claude"), { recursive: true });
+    await fs.writeFile(path.join(env.home, ".claude", ".midbrain-capture-client"), "nanoclaw\n");
+    const result = runShim("user", {
+      prompt: '<context timezone="UTC" />\n<message id="1" from="harness" sender="Harness" time="now">&lt;!-- marker --&gt; &amp;lt;literal&amp;gt;</message>',
+      cwd: projectDir, session_id: "native-session",
+    });
+    expect(result.status).toBe(0);
+    const rows = (await readFetchLog()).filter(r => r.url.includes("/memories/episodic"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].body.text).toBe("<!-- marker --> &lt;literal&gt;");
+    expect(rows[0].body.memory_metadata).toMatchObject({ client: "nanoclaw", session_id: "native-session" });
+  });
+
   it("assistant role: captures the final message; stdout empty; exit 0", async () => {
     const result = runShim("assistant", {
       last_assistant_message: "e2e assistant marker PRD-034",

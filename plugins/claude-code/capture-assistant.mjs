@@ -15,6 +15,7 @@ import { appendToSpool } from "../../shared/claude-spool.mjs";
 import { claimLegacyOpenerRecovery } from "../../shared/claude-opener-recovery.mjs";
 import {
   deliveredNanoclawMessage,
+  nanoclawUserText,
   readClaudeTranscript,
   recoverLegacyOpener,
 } from "../../shared/claude-transcript.mjs";
@@ -54,7 +55,7 @@ async function captureAssistant() {
         hookEventName: input.hook_event_name,
         lastAssistantMessage: input.last_assistant_message,
       });
-      if (candidate && claimLegacyOpenerRecovery()) recoveredUser = candidate;
+      if (candidate && claimLegacyOpenerRecovery()) recoveredUser = nanoclawUserText(candidate);
     } catch { /* recovery uncertainty never blocks assistant capture */ }
   }
 

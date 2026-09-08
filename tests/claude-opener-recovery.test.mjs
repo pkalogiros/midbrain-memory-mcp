@@ -289,3 +289,12 @@ describe("terminal legacy opener receipt", () => {
     expect(claimLegacyOpenerRecovery()).toBe(false);
   });
 });
+
+it('decodes only NanoClaw transport envelopes and only one layer of escaping', async () => {
+  const { nanoclawUserText } = await import('../shared/claude-transcript.mjs');
+  const literal = '<!-- marker --> &lt;keep&gt; "quoted"';
+  const envelope = '<context timezone="UTC" />\n<message id="2" from="harness" sender="Harness" time="now">&lt;!-- marker --&gt; &amp;lt;keep&amp;gt; &quot;quoted&quot;</message>';
+  expect(nanoclawUserText(envelope)).toBe(literal);
+  expect(nanoclawUserText(literal)).toBe(literal);
+  expect(nanoclawUserText('<message>user-authored text</message>')).toBe('<message>user-authored text</message>');
+});

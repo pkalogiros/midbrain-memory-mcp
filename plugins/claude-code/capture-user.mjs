@@ -20,11 +20,14 @@ import { appendToSpool } from "../../shared/claude-spool.mjs";
 import { buildCaptureMetadata } from "../../shared/capture-metadata.mjs";
 import { formatPkContext, isPkInjectionEnabled } from "../../shared/pk-inject.mjs";
 
+import { nanoclawUserText } from "../../shared/claude-transcript.mjs";
+
 async function captureUser() {
   const input = await readStdinJSON();
   if (!input?.prompt) return;
 
   const client = await captureClientLabel();
+  const text = client === "nanoclaw" ? nanoclawUserText(input.prompt) : input.prompt;
   const metadata = buildCaptureMetadata({
     client,
     cwd: input.cwd,
@@ -42,7 +45,7 @@ async function captureUser() {
     // durable ~/.claude surface so a later authenticated server-start flush
     // recovers it, instead of dropping it.
     if (client === "nanoclaw" && isNoKeyError(error) && appendToSpool({
-      text: input.prompt,
+      text,
       role: "user",
       memory_metadata: metadata,
     })) log.warn("NO KEY — spooling for recovery");
@@ -50,12 +53,12 @@ async function captureUser() {
   }
 
   // Episodic capture must complete before default-off exits.
-  await api.storeEpisodic(input.prompt, "user", log, metadata);
+  await api.storeEpisodic(text, "user", log, metadata);
 
   if (!isPkInjectionEnabled()) return;
 
   // Opt-in legacy PK injection — 2s timeout inside searchProcedural.
-  const entries = await api.searchProcedural({ query: input.prompt, excludeIds: [] });
+  const entries = await api.searchProcedural({ query: text, excludeIds: [] });
   if (entries.length > 0) {
     const ctx = formatPkContext(entries);
     log.debug(`PK: injected ${entries.length} entries ids=${entries.map((e) => e.id).join(",")}`);
