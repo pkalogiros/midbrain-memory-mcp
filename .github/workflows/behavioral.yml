@@ -1,0 +1,163 @@
+name: Behavioral tests
+run-name: Behavioral ${{ inputs.suite }} (${{ inputs.anthropic_model }})
+
+# Manual only: no PR, push, schedule, deployment, or publish trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Smoke, or full required matrix (Codex native approval currently remains BLOCKED)'
+        type: choice
+        options: [smoke, required]
+        default: smoke
+      anthropic_model:
+        description: 'Anthropic model used by Claude, OpenCode, Hermes and NanoClaw'
+        type: choice
+        options: [claude-haiku-4-5, claude-sonnet-5]
+        default: claude-haiku-4-5
+
+permissions:
+  contents: read
+
+# Serialize all branches: the dedicated API identities must not have overlapping runs.
+concurrency:
+  group: midbrain-behavioral
+  cancel-in-progress: false
+
+jobs:
+  behavioral:
+    runs-on: [self-hosted, linux, midbrain-behavioral]
+    environment: behavioral-testing
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    env:
+      MIDBRAIN_CI_SUITE: ${{ inputs.suite }}
+      MIDBRAIN_HARNESS_CLAUDE_MODEL: ${{ inputs.anthropic_model }}
+      MIDBRAIN_HARNESS_OPENCODE_MODEL: anthropic/${{ inputs.anthropic_model }}
+      MIDBRAIN_HARNESS_HERMES_MODEL: ${{ inputs.anthropic_model }}
+      MIDBRAIN_HARNESS_NANOCLAW_MODEL: ${{ inputs.anthropic_model }}
+      MIDBRAIN_HARNESS_CODEX_MODEL: gpt-5.6-sol
+      MIDBRAIN_HARNESS_CODEX_AUTH: apikey
+      MIDBRAIN_HARNESS_OPENCODE_VERSION: 1.18.29
+      MIDBRAIN_HARNESS_HERMES_VERSION: 0.19.0
+      MIDBRAIN_HARNESS_API_URL: ${{ vars.MIDBRAIN_HARNESS_API_URL }}
+      MIDBRAIN_HARNESS_TURN_TIMEOUT_MS: 300000
+      MIDBRAIN_HARNESS_VERDACCIO: verdaccio@6.2.0
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.3.0
+          cache: npm
+
+      - name: Prepare private job directories
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$HOME/.midbrain-harness/ci/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$root"
+          mkdir -p "$root"
+          echo "MIDBRAIN_HARNESS_ROOT=$root" >> "$GITHUB_ENV"
+          echo "MIDBRAIN_CI_ARTIFACTS=$RUNNER_TEMP/midbrain-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+
+      - name: Install repository dependencies
+        run: npm ci
+
+      - name: Install pinned client CLIs locally
+        run: |
+          npm install --prefix "$MIDBRAIN_HARNESS_ROOT/clients" --no-audit --no-fund --no-save \
+            @anthropic-ai/claude-code@2.1.258 @openai/codex@0.150.1
+          echo "$MIDBRAIN_HARNESS_ROOT/clients/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Check prerequisites before model calls
+        env:
+          MIDBRAIN_HARNESS_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_API_KEY }}
+          MIDBRAIN_HARNESS_PROJECT_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_PROJECT_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          for (const name of ['MIDBRAIN_HARNESS_API_URL', 'MIDBRAIN_HARNESS_API_KEY', 'MIDBRAIN_HARNESS_PROJECT_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) {
+            if (!process.env[name]?.trim()) throw new Error(`Missing ${name}`);
+          }
+          if (process.env.MIDBRAIN_HARNESS_API_KEY === process.env.MIDBRAIN_HARNESS_PROJECT_API_KEY) throw new Error('Project and global test keys must differ');
+          const api = new URL(process.env.MIDBRAIN_HARNESS_API_URL);
+          if (!['http:', 'https:'].includes(api.protocol) || api.username || api.password || api.search || api.hash) throw new Error('Use a dedicated API URL without embedded credentials');
+          const response = await fetch(new URL('/health', api), { signal: AbortSignal.timeout(10000) });
+          if (!response.ok) throw new Error('Test API health check failed');
+          JS
+          command -v uv >/dev/null
+          command -v git >/dev/null
+          docker info >/dev/null
+          node harness/run.mjs doctor > "$MIDBRAIN_HARNESS_ROOT/doctor.log" 2>&1
+
+      - name: Run behavioral suite
+        id: run
+        timeout-minutes: 195
+        env:
+          MIDBRAIN_HARNESS_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_API_KEY }}
+          MIDBRAIN_HARNESS_PROJECT_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_PROJECT_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          case "$MIDBRAIN_CI_SUITE" in
+            smoke) args=(--mode registry --scenarios s01,s06) ;;
+            required) args=(--mode registry --upgrade --required) ;;
+            *) exit 2 ;;
+          esac
+          # Full output is private; the next step exports selected redacted evidence.
+          node harness/run.mjs run "${args[@]}" > "$MIDBRAIN_HARNESS_ROOT/run.log" 2>&1
+
+      - name: Collect evidence even after a failed run
+        id: evidence
+        if: ${{ always() && (steps.run.outcome == 'success' || steps.run.outcome == 'failure') }}
+        env:
+          MIDBRAIN_HARNESS_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_API_KEY }}
+          MIDBRAIN_HARNESS_PROJECT_API_KEY: ${{ secrets.MIDBRAIN_HARNESS_PROJECT_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node harness/scripts/ci-evidence.mjs
+
+      - name: Upload selected evidence only
+        if: ${{ always() && steps.evidence.outcome != 'skipped' && steps.evidence.outcome != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavioral-${{ inputs.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.MIDBRAIN_CI_ARTIFACTS }}/summary.md
+            ${{ env.MIDBRAIN_CI_ARTIFACTS }}/bundle/
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
+
+      - name: Require verified release evidence for the required suite
+        if: ${{ always() && inputs.suite == 'required' }}
+        env:
+          VERIFIED: ${{ steps.evidence.outputs.verified }}
+        run: test "$VERIFIED" = true
+
+      - name: Remove this job's private homes and containers
+        if: ${{ always() && env.MIDBRAIN_HARNESS_ROOT != '' }}
+        run: |
+          set -euo pipefail
+          # Only this workflow attempt's directory and its labelled containers.
+          expected="$HOME/.midbrain-harness/ci/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$MIDBRAIN_HARNESS_ROOT" = "$expected"
+          trap 'rm -rf -- "$expected"' EXIT
+          for run in "$expected"/runs/*; do
+            test -d "$run" || continue
+            id="$(basename "$run")"
+            [[ "$id" =~ ^[0-9]{8}-[0-9]{6}-[a-f0-9]{4}$ ]] || exit 1
+            containers="$(docker ps -aq --filter "label=dev.midbrain.harness.run=$id")"
+            if [ -n "$containers" ]; then
+              while IFS= read -r container; do docker rm -f "$container"; done <<< "$containers"
+            fi
+          done

@@ -121,7 +121,7 @@ by the `dev.midbrain.harness.run` label. Images are cached intentionally for lat
 
 This lane covers MCP integration through the real runner. Slack/WhatsApp delivery, host
 routing, OneCLI gateway provisioning, and other NanoClaw providers are outside its scope.
-Behavioral CI/release wiring remains separate work.
+The manual workflow is built; runner activation, Linux validation and release enforcement remain separate work.
 
 ### Trustworthy runs
 
@@ -155,7 +155,7 @@ using ephemeral homes need the same durable cache mount (`/home/node/.npm`) to
 avoid simultaneous cold npm installs by MCP and capture hooks. Upgrade validation
 explicitly clears each group's `_npx` resolution cache before checking the new version.
 Hermes acceptance, OpenCode capture without MCP, Claude hook order, and NanoClaw
-lifecycle have explicit cases. CI/release integration remains separate work.
+lifecycle have explicit cases. The manual workflow below still needs runner provisioning and live validation.
 
 ## Export release evidence
 
@@ -185,3 +185,10 @@ Do not export `results.partial.json` or treat an interruption report as a comple
 The [coverage map](../docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership)
 distinguishes current checks from unvalidated or missing coverage. Follow the
 [release validation checklist](../docs/releases/README.md#release-validation-checklist).
+
+## GitHub Actions
+
+A manual [behavioral workflow](../.github/workflows/behavioral.yml) is implemented with
+smoke/required suites, pinned models/clients, selected artifacts and scoped cleanup.
+It has not been deployed or run in the cloud. See [runner and secret setup](../docs/testing/behavioral-ci.md).
+The required suite retains the native Codex approval check and cannot yet pass unattended.

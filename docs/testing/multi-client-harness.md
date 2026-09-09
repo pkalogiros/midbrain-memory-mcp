@@ -414,12 +414,13 @@ The complete required run needs a terminal for Codex's native `/hooks` approval.
 bypass does not satisfy persisted approval. A non-interactive job therefore cannot currently
 produce a green complete matrix. Do not introduce an exception waiver to hide this limitation.
 
-The next deployment should be one manually triggered CI workflow, with a dedicated runner,
-secrets, serialized execution, bounded runtime, health checks, and the selected evidence bundle
-as its artifact. Start on a platform whose client/Docker setup has been validated. Linux
-cloud execution needs that validation first. Automating native approval must preserve the
-before/after capture proof; until then the release gate includes an attended step.
-No behavioral workflow, runner provisioning, or real-npm post-publish smoke mode exists yet.
+A manually triggered [behavioral workflow](../../.github/workflows/behavioral.yml) is now built
+with pinned clients/models, serialized execution, bounded runtime, health checks, selected
+evidence artifacts and scoped cleanup. It is not deployed or cloud-validated. See
+[setup and execution boundaries](behavioral-ci.md). Linux execution needs validation first.
+Automating native approval must preserve the before/after capture proof; until then the
+required workflow records the blocked case and remains red. Runner provisioning and a
+real-npm post-publish smoke mode are not implemented.
 
 ## 9. Remaining decisions and release boundaries
 
@@ -429,8 +430,8 @@ No behavioral workflow, runner provisioning, or real-npm post-publish smoke mode
    configuration; cheaper-model failures remain recorded and need triage.
 3. Run the full required gate and obtain Radu's review of all four product changes below.
    Evidence export is ready; it cannot manufacture a passing run.
-4. Wire the existing command and bundle into a dedicated runner after agreeing how to handle
-   native approval. Broader OS coverage and post-publish upgrade smoke remain separate work.
+4. Provision and validate a dedicated runner for the built workflow after agreeing how to
+   handle native approval. Broader OS coverage and post-publish upgrade smoke remain separate work.
 
 
 ## NanoClaw implementation boundary
@@ -460,8 +461,8 @@ retrieving the reader's own marker-bearing question cannot pass the cell.
 
 The adapter uses local transport instead of external messaging integrations. It does not
 validate Slack/WhatsApp, the full NanoClaw host dispatcher, OneCLI provisioning, or all model
-providers. Its behavioral CI/release scheduling and Linux validation remain to be wired and
-verified; the implementation alone is not evidence of five-client release parity.
+providers. The manual behavioral workflow is built; runner activation and Linux validation
+remain pending. The implementation alone is not evidence of five-client release parity.
 
 Each NanoClaw group has its own agent workspace. It uses the selected project's
 memory credential without replacing the host project's instructions or sharing

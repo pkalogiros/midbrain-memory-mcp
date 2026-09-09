@@ -26,8 +26,10 @@ For changes covered by the multi-client harness:
 5. Obtain Radu's product review, including the
    [four harness-discovered product changes](../testing/multi-client-harness.md#release-review-for-the-hardening-changes).
    Record remaining coverage boundaries from the [coverage map](../testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership).
-6. Publishing remains a separate authorized release action. No automated behavioral workflow
-   enforces this checklist yet; no real-npm post-publish upgrade smoke mode exists yet.
+6. Publishing remains a separate authorized release action. The manual
+   [behavioral workflow](../testing/behavioral-ci.md) is built but not deployed or cloud-validated;
+   native Codex approval prevents unattended sign-off. It does not enforce product review or
+   publishing, and no real-npm post-publish upgrade smoke mode exists yet.
 
 Focused passes and incomplete/blocked reports are checkpoints, not release approval.
 
