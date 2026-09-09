@@ -1,6 +1,6 @@
 # Multi-Client MCP Testing Harness — Design
 
-Status: implementation and remaining release work (2026-09-08). Owner: Pantelis (operations). Reviewer: Radu (technical).
+Status: implemented harness, evidence export, and remaining release work (2026-09-09). Owner: Pantelis (operations). Reviewer: Radu (technical).
 Baseline: `origin/main` = v0.4.10 (`b09f9f6`), 49 Vitest files / 1,237 cases, CI matrix ubuntu + windows + macos.
 
 This document turns the "multi-client MCP testing overview" into a concrete pipeline
@@ -17,7 +17,7 @@ candidate**:
 | Lane | Proves | Mechanism | Exists today? |
 |---|---|---|---|
 | Programmatic | package, installer, hooks, config, credentials, self-repair, capture and recovery paths behave deterministically | Vitest suite + gate scripts + OS matrix | Yes (see §3) |
-| Behavioral | real agents in real clients capture, recall, continue, reconcile, stay clean on no-match, and read memory written by other clients | `harness/` launches real client sessions and scores raw evidence | **No** — this is the deliverable |
+| Behavioral | real agents in real clients capture, recall, continue, reconcile, stay clean on no-match, and read memory written by other clients | `harness/` launches real client sessions and scores raw evidence | Implemented for all five clients; complete passing required matrix still needed |
 
 Parity is asserted at three levels: package parity (OS matrix), client-integration parity
 (tools exposed, scope resolved, events captured, metadata correct, self-repair safe), and
@@ -30,7 +30,7 @@ mechanisms; only the observable outcomes must match.
 |---|---|---|
 | Client adapters (`id`, `isInstalled`, `installGlobal`, `installProject`, `isFresh`, `repair*`) | `shared/clients/{base,registry,claude,codex,hermes,nanoclaw,opencode}.mjs` | The harness manifests wrap these; install goes through the real installer, never a parallel implementation |
 | Throwaway-home fixture + managed env key list | `tests/helpers/test-env.mjs` (`makeTestEnv`, `MANAGED_ENV_KEYS`, `sandboxPaths`) | Env scrubbing list and detection-fixture recipe |
-| Real-home tripwire (hash-before / hash-after on enumerated real config surfaces) | `tests/helpers/global-tripwire.mjs` (`tripwireSurfaces`, `collectHashes`, `diffHashes`) | Imported directly; extended with live-client surfaces (§6.4) |
+| Real-home tripwire (hash-before / hash-after on enumerated real config surfaces) | `tests/helpers/global-tripwire.mjs` (`tripwireSurfaces`, `collectHashes`, `diffHashes`) | Imported directly; extended with live-client surfaces (§6.5) |
 | Fetch-log preload and loopback HTTP stub patterns | `tests/claude-shim-e2e.test.mjs`, `tests/api-host-parity.e2e.test.mjs` | Optional offline mode for capture assertions without the real API |
 | Episodic read-back endpoint | `shared/midbrain-api.mjs` `GET /api/v1/memories/episodic?page&limit&start_date&end_date` → `{items:[{role,text,occurred_at,memory_metadata}]}` | Primary evidence source for capture and metadata |
 | Diagnostics report | `shared/diagnostics.mjs` (`pending_entries`, `cache_location`, `capture_log`, probe) | Cheap health collector per client |
@@ -70,24 +70,24 @@ Existing coverage, by the checklist in the overview:
 | Checklist item | Covered by | Gap |
 |---|---|---|
 | Clean global / project install | `install.test.mjs`, `client-*.test.mjs`, `self-repair-safety.test.mjs` | — |
-| Upgrade from previous published version | `install.test.mjs` (update check, npx cache clear), `api-host-migration`, `hook-ownership`, NanoClaw cold-upgrade e2e | **No test installs a previously published tarball and upgrades through `npx …@latest`** → harness registry mode (§7) |
+| Upgrade from previous published version | `install.test.mjs` (update check, npx cache clear), `api-host-migration`, `hook-ownership`, NanoClaw cold-upgrade e2e | Implemented in registry/upgrade mode (§7); automatic 24 h update discovery and real-npm post-publish smoke remain separate |
 | Manual + startup self-repair | `self-repair-safety`, `hostile-home`, `shim-freshness`, `nanoclaw-topology.e2e`, `cache-boot-drain` | — |
 | Credential precedence, API host binding | `client-base`, `credential-*`, `keystore`, `api-host*`, `mcp-api-host` | — |
 | Per-client config formats | `client-{claude,codex,hermes,opencode,nanoclaw}` | — |
 | Tool registration / schemas | `mcp.test.mjs` only | thin, but exact (12 tools, exact names, schemas) |
-| User / assistant / tool capture | `claude-shim-e2e`, `codex-hooks`, `hermes-hooks`, `client-opencode-runtime`, `nanoclaw-topology.e2e` | shim/plugin driven, never a real client process |
+| User / assistant / tool capture | `claude-shim-e2e`, `codex-hooks`, `hermes-hooks`, `client-opencode-runtime`, `nanoclaw-topology.e2e` | Programmatic tests are shim/plugin driven; S1/S8/S10 add real-client evidence |
 | cwd / session metadata | `capture-metadata`, runtime tests | — |
 | Duplicate / missing capture | `claude-opener-recovery`, `claude-spool`, `cache-boot-drain`, e2e | — |
 | Offline cache / spool recovery, races | `episodic-cache`, `claude-spool`, `flush-runner`, e2e | — |
 | Package contents / exact version | `docs-regression` (`npm pack --dry-run`), `check-pinned-spec.sh` | — |
-| Host isolation | `global-tripwire`, `env-isolation`, `credential-isolation`, `check-test-isolation.sh` | tripwire never validated against a **live** client mutating config → §6.4 |
+| Host isolation | `global-tripwire`, `env-isolation`, `credential-isolation`, `check-test-isolation.sh` | Live runs recorded clean isolation; the tripwire detects changes on enumerated surfaces (§6.5) |
 | Uninstall idempotency | — | **no uninstall exists in the product** |
 | Windows shim chain e2e | — | all spawn-based e2e are `skipIf(IS_WIN)` |
 
-The programmatic lane in the pipeline is therefore: `npm run check` (build, lint, tests,
-pinned-spec, test-isolation) on the OS matrix, plus `npm pack` identity, plus the harness's
-own post-install assertions per client (config files present, hooks/plugins fresh, shim fresh,
-tool list = 12, MCP server connected). Nothing here requires new Vitest files on day one.
+Existing CI runs build/tests on macOS, Windows and Linux; `npm run check` also runs once
+on Linux. The harness adds package identity and per-client install/freshness checks. Tool
+availability comes from native initialization, successful calls or a client probe; exact
+tool schemas remain programmatic coverage. These lanes are not yet joined by a release workflow.
 
 ## 4. Behavioral lane — architecture
 
@@ -104,7 +104,9 @@ harness/
     api.mjs               MidBrain read-back (episodic since run start, polling)
     evidence.mjs          transcripts, midbrain logs, cache/spool counts, codex turn dirs
     checks.mjs            deterministic check helpers, cell status rules
-    report.mjs            report.md (side-by-side matrix) + report.json
+    report.mjs            render report.md from results.json
+  scripts/
+    release-evidence.mjs  offline export and verification of completed runs
   clients/
     index.mjs             manifest registry
     claude.mjs codex.mjs opencode.mjs hermes.mjs nanoclaw.mjs
@@ -119,8 +121,8 @@ multi-minute real sessions. The programmatic lane stays in Vitest.
 
 ### 4.1 Client manifest (the extension point)
 
-Adding a client means adding one file in `harness/clients/` and nothing in `lib/` or
-`scenarios/`. A manifest declares:
+Adding a client means adding a manifest file and registering it in
+`harness/clients/index.mjs`; shared scenarios and scoring stay unchanged. A manifest declares:
 
 ```js
 export default {
@@ -159,7 +161,7 @@ export default {
 | Codex | `codex exec --json --skip-git-repo-check -C <project> -o <file> [--dangerously-bypass-hook-trust] <prompt>`; continued = `codex exec resume <thread> <prompt>` | `thread.started.thread_id` | JSONL items (`mcp_tool_call`, `agent_message`, `command_execution`); `$TMPDIR/midbrain-codex-{assistant-turns,tool-events}/<session>/<turn>/` receipts |
 | OpenCode | run-local install of `opencode-ai` into `<run>/tools`; `opencode run --format json --dir <project> [-s <session>]`; `opencode mcp list` proves the MCP connection without a model call | session id present on every JSON event | `opencode export <sessionID>` (messages + parts incl. tool state); plugin log `midbrain-opencode.log`; sqlite db |
 | Hermes | run-local `uv tool install 'hermes-agent[mcp]'`; `hermes chat -q <prompt> -Q --provider anthropic -m <model> [--resume <id>]` with `HERMES_ACCEPT_HOOKS=1`; `hermes hooks list` shows consent state, `hermes mcp list` the server | session id from `-Q` output or `hermes sessions list` | `hermes sessions export --format jsonl`; `shell-hooks-allowlist.json`; `midbrain-hermes.log` |
-| NanoClaw | Docker required; group container with `.claude-shared/settings.json` merge (driver: phase 3) | Stop payload `session_id` | transcript under `/home/node/.claude/projects`, spool/receipt files |
+| NanoClaw | Implemented: pinned upstream runner in Docker, isolated SQLite mailbox and durable per-group state/npm cache | Stop payload `session_id` | transcript under `/home/node/.claude/projects`, spool/receipt files |
 
 Hermes's run-owned config sets `mcp_discovery_timeout: 30` so cold npx startup
 can finish before its first tool snapshot (Hermes 0.19 defaults to 1.5 seconds).
@@ -172,13 +174,15 @@ response, the adapter retains the complete file from the run's OpenCode tool-out
 directory for scoring. A truncated export cannot erase current-turn evidence or
 credit calls from an earlier resumed turn.
 
-Cold-first-turn coverage requires a separate clean-home run without `--upgrade`.
-An upgrade prelude has already started client sessions before S1, so that case
-is reported as blocked rather than credited as a cold start.
+Claude's cold-first-turn case creates a separate fresh home and npm cache when an
+upgrade prelude has already warmed the main home. S1 in that warmed home is not
+credited as cold-start evidence. Codex's persisted-approval case opens the native
+UI with `--interactive`, then checks capture in a fresh process without the bypass.
 
 All children receive a **scrubbed env**: `HOME`/`USERPROFILE` → run home; `TMPDIR`/`TEMP`/`TMP`
-→ `<run>/tmp`; `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME`, `npm_config_cache` inside the
-run home; `MIDBRAIN_LOG_DIR=<run>/logs`, `MIDBRAIN_LOG_LEVEL=debug`; **deleted**: `CI`,
+→ `<run>/tmp`; `CODEX_HOME`, `HERMES_HOME`, `npm_config_cache` inside the
+run home; `CLAUDE_CONFIG_DIR` is unset so Claude reads the installer's `$HOME/.claude.json`;
+`MIDBRAIN_LOG_DIR=<run>/logs`, `MIDBRAIN_LOG_LEVEL=debug`; **deleted**: `CI`,
 `VITEST`, every `MIDBRAIN_*`, `ANTHROPIC_*`, `OPENAI_*`, `CLAUDE_*`/`CLAUDECODE`, `XDG_*`,
 `NANOCLAW_HOME`; then the manifest adds only its own secret(s). `PATH` is the host PATH with
 `<run>/tools/bin` prepended.
@@ -207,26 +211,46 @@ run home; `MIDBRAIN_LOG_DIR=<run>/logs`, `MIDBRAIN_LOG_LEVEL=debug`; **deleted**
   `node <candidate>/install.mjs --dev --non-interactive --no-login` (dev mode) or
   `npx -y midbrain-memory-mcp@latest install --non-interactive --no-login` (registry mode).
 
-## 5. Behavioral scenarios (frozen prompts, expected outcomes, checks)
+## 5. Behavioral coverage and prompt ownership
 
-Prompts below are **drafts** until the maintainer's manual scenario notes are supplied; the
-structure and checks are final. `M` = sub-marker. All checks are deterministic; no LLM judge.
+The user's overview asks for the workflows below. Each row maps that checklist to the
+current executable scenario. Exact prompts are defined in `harness/scenarios/` and saved
+as `<label>.prompt.json` for every turn; the run also preserves and hashes those source files.
+The descriptions here summarize the implementation, not a second set of prompt templates.
 
-| # | Scenario | Kind | Prompt (draft) | Expected raw evidence | Report rows |
-|---|---|---|---|---|---|
-| S1 | Capture | single | "Please remember this exactly: the harness marker for this session is `M`. Reply with just the marker." | Within ≤90 s the API returns exactly one `user` row and ≥1 `assistant` row containing `M`; both have `memory_metadata.client` = expected label, a `session_id` matching the real client session and the exact client workspace `cwd`. Capture counts settle for five seconds and match native responses. Zero rows with `M` from any other client. | User capture, Assistant capture, Metadata, Duplicates and missing turns |
-| S2 | Cross-client recall | directed pair A→B | A: S1 prompt. B (fresh): "Search your MidBrain memory for the token `M` and tell me the exact token and which client recorded it. Do not guess; say not found if it is not there." | B's turn contains ≥1 midbrain tool call whose input contains `M` verbatim; B's final text contains `M`. | Cross-client recall (credited to B) |
-| S3 | Fresh-session continuity | single | Session 1: "We are working on task `M`. Checkpoint: the next step is to rename `alpha_<h>` to `beta_<h>` in utils.py. Acknowledge briefly." Session 2 (new session id, same client, same project): "Use memory to find the checkpoint for task `M` and tell me the exact next step, quoting the function names." | Session 2 has a successful MidBrain result containing both hidden function names and reports them in its answer; its session ID differs from session 1. | Fresh-session continuity |
-| S4 | Global vs project isolation | single | Write `M` from `proj-b` (project key = second agent). Ask from `proj-a` (global key) → expect *not found*; ask from `proj-b` → expect found. Write `M2` from `proj-a`; ask from `proj-b` → not found (project key isolates); ask from a third global-only cwd → found (global fallback). | Tool calls present in every ask; found/not-found matches the table. | Project and global isolation |
-| S5 | Freshness and reconciliation | single | T1: "Note for task `M`: the deploy target is currently `staging-1`." T2 (new session): "Update for task `M`: the deploy target changed to `prod-7`; `staging-1` is retired." T3 (new session): "What is the current deploy target for task `M`? Cite the evidence." | Targets are randomized per run. T3 returns JSON with the exact `current` target and an `evidence` explanation; the current hidden value also appears in a successful MidBrain result. | Freshness reconciliation |
-| S6 | No-match cleanliness | single | "What is the capital of Australia? Answer in one short sentence." | Final text contains "Canberra"; contains none of: /midbrain/i, `memory_search`, `check_session_status`, /episodic/i, /not found after search/i, any `MBH-`. Tool-call count recorded as info. | No-match clean |
-| S7 | Rule and priming compliance | derived from S2/S3/S5 | — | First tool call of a recall turn is a midbrain discovery/search (Claude: `ToolSearch` then `mcp__midbrain-memory__*`; Codex/OpenCode: visible MCP call), not a shell/file tool; the marker appears verbatim in the query (anchor preservation); if the first search returned no hit, a follow-up search used `limit ≥ 50` or a different surface (search deeper). | Rule and priming compliance |
-| S8 | Marker and prompt robustness | single | "Echo the following line back exactly, then say done: `<!-- mb:ctx-start --> midbrain-memory-rules:start MBH-LITERAL-TEST`" | Final text contains the literal line intact; captured `user` row contains it intact (unsigned marker-like text is not scrubbed). | Marker and prompt robustness |
-| S9 | Upgrade continuity | run-level | Registry mode only: install previous published version from the loopback registry, run S1, publish candidate as `latest`, clear npx cache as the product does, run S1 + S2 again in existing and fresh sessions. | The client resolves the candidate version; a hidden pre-upgrade value appears in successful MCP evidence and the final answer; new capture lands and adapter freshness passes. | Upgrade and self-repair |
-| S10 | Client-specific | per manifest | Claude + Codex: cold first turn captured (S1 is the first turn ever in the home) + stale shim (exec bit stripped in dev mode, body appended in registry mode) repaired by the next session's startup self-repair with the assistant capture landing; the opening user hook may race repair, which is the documented first-hook race. Codex: hooks with persisted trust vs `--dangerously-bypass-hook-trust`; untrusted project dir. Hermes: hook prompt vs `hooks_auto_accept`. OpenCode: capture with the MCP entry disabled, then hidden-value recall from a fresh process with MCP restored. NanoClaw: cold wake with env-stripped hook child; legacy opener recovery. | As stated per cell. | Client-specific scenarios |
+| Overview requirement | Implementation / source under `harness/` | What the current check establishes |
+|---|---|---|
+| Capture, metadata, duplicates | `scenarios/s01-capture.mjs` | Marker-bearing user/assistant rows, session/client/cwd metadata, settled counts and no foreign-client rows. NanoClaw expects exactly one capture per native reply. Literal marker obedience is part of this check; a paraphrase can fail even if capture occurred. |
+| Cross-client recall | `scenarios/s02-cross-client-recall.mjs` | All 20 directed pairs for five clients. Hidden values disclosed only to the writer must appear in successful MCP evidence and the reader's answer. |
+| Fresh-session continuity | `scenarios/s03-fresh-session-continuity.mjs` | New session retrieves hidden function names from the previous checkpoint and reports them correctly. |
+| Project/global memory | `scenarios/s04-project-global-isolation.mjs` | Separate agent keys; direct store checks in both directions, project lookup and global fallback from another directory. The model asks global-for-project, project-for-project and global-for-global; there is no separate project-for-global reader turn. |
+| Current-state reconciliation | `scenarios/s05-freshness-reconciliation.mjs` | Newer state-changing memory wins over an older memory; hidden current value appears in successful recall and an unambiguous JSON answer. Conflicting live repository/file state is not exercised. |
+| Clean no-match behavior | `scenarios/s06-no-match-clean.mjs` | An unrelated factual question gets a clean answer without MidBrain process language. This does not force a failed memory lookup; S4 separately exercises a scoped not-found response. |
+| Memory-first rules (S7) | `lib/checks.mjs`, called by S2/S3/S5 | First tool is memory/discovery, full anchor preserved, and an observed empty result triggers a wider/different search. No separate S7 driver. |
+| Literal marker robustness | `scenarios/s08-marker-robustness.mjs` | Marker-like user text remains intact, answer echoes it, and an assistant row containing the marker is captured. |
+| Upgrade continuity | `lib/upgrade.mjs`, `scenarios/s09-upgrade-continuity.mjs` | Previous published package → locally served candidate; cache resolution reset, install freshness, new capture and recall of pre-upgrade values. Does not prove automatic update discovery or post-publish upgrade against real npm. |
+| Client-specific behavior | `scenarios/s10-client-specific.mjs`, `scenarios/nanoclaw-lifecycle.mjs` | Claude fresh-home first turn and shim repair; Codex capture before/after native approval and project trust; Hermes consent; OpenCode plugin-only capture; NanoClaw cold wake, resume and legacy recovery. |
 
-PK same-turn injection is added as an extra column set only when
-`MIDBRAIN_HARNESS_PK=1` sets `MIDBRAIN_ENABLE_PK_INJECTION=1` in the hook env (product default off).
+This reconciles the implementation with the overview supplied in the conversation. The
+maintainer's separate manual prompts/edge-case list has not been supplied here, so exact
+manual-suite equivalence remains unconfirmed. Review these rows against that list when it
+arrives; do not describe the current prompts as maintainer-approved or silently add scenarios.
+PK can be enabled through `MIDBRAIN_HARNESS_PK`, but there is no separate scored PK lane.
+
+### Implemented versus validated
+
+- **Implemented:** five adapters, the checks above, package freezing, native capture,
+  isolated workspaces, registry upgrades, deterministic scoring, and offline evidence export.
+- **Recorded validation:** see [2026-09-08 validation](validation-2026-09-08.md). The original
+  required run finished 93 PASS / 27 FAIL / 1 BLOCKED. The later four-client run was
+  32 PASS / 1 FAIL; a separate OpenCode rerun passed after its fix. A subsequent required
+  run stopped on provider billing. Those reports are retained without rewriting outcomes.
+- **Pending proof:** a complete passing required matrix for the chosen candidate and model
+  pins, plus Radu's release review. A parallel 2026-09-09 run is not a sign-off artifact until
+  it completes and its result is checked; this document does not infer its outcome.
+- **Outside current proof:** Linux NanoClaw behavioral validation, broader supported OS/client
+  combinations, CI/release enforcement, automatic update discovery, real-npm post-publish
+  smoke, and the scope limits in the table above. No uninstall exists to test.
 
 ### 5.1 Cell status rules
 
@@ -240,40 +264,66 @@ PASS, no unexplained duplicate or missing rows, and every exception written down
 
 ## 6. Evidence, scoring, isolation
 
-### 6.1 Evidence bundle (per run)
+### 6.1 Private run evidence
 
 ```
 <run>/
   candidate.json          version, git sha, dirty flag, npm pack file list + integrity, mode
-  run.json                run id, marker, os/arch, node, client versions, config shape hashes
-  home/                   the throwaway home (kept on failure, pruned on success unless --keep)
+  home/                   durable private home; contains credentials, never upload
   logs/midbrain-*.log     hook + plugin + server logs at debug level
   evidence/<client>/<scenario>/
     turn-<n>.ndjson       raw client stream (stream-json / codex JSONL)
     turn-<n>.json         normalized Turn
     readback.json         API rows matched to the sub-marker
     transcript.jsonl      Claude transcript copy (when available)
-  results.json            every cell with checks, status, prompt, expected, evidence refs
+  results.json            run/models/clients/candidate identity and every cell with checks/evidence
   report.md               side-by-side matrix + per-cell detail
   isolation.json          tripwire before/after diff
 ```
 
-### 6.2 Primary vs supplementary evidence
+### 6.2 Shareable release evidence
+
+`node harness/scripts/release-evidence.mjs export <completed-run> <new-bundle-directory>`
+produces a selected, redacted review bundle outside the run. It contains `report.md`,
+`results.json`, `candidate.json`, a README, normalized turns/prompts/readbacks, the native
+approval receipt when present, and a checksum manifest. Raw streams, complete transcripts,
+installer logs, configs, databases, package archives and run homes are not copied.
+Omitted references are recorded, and report references point only to exported evidence.
+
+The exporter reads known credentials from the run's own files and current harness env for
+redaction, also masks structured secret fields/token patterns, and removes host/run paths.
+Review the bundle before sharing: arbitrary sensitive text cannot be exhaustively detected.
+Native raw evidence remains available privately if a reviewer needs to audit normalization.
+
+`node harness/scripts/release-evidence.mjs verify <bundle> <release.tgz> <full-source-sha>`
+checks checksums, report/results agreement, coverage, model/client versions, clean isolation,
+passing underlying checks and the existing `runExitCode` rule. It also matches the intended
+release's exact archive hash and source SHA. Focused, failed, blocked and dirty-source runs
+can be exported as **checkpoints**, but do not pass release verification. Partial or
+interrupted runs without completed results cannot be exported. Export success itself is
+not a passing gate. Checksums provide integrity, not a signature or proof of authorship.
+
+Registry mode may rewrite a package to an RC version. Its tested archive hash then differs
+from the original source archive: a stable-version repack needs its own validation. Bundle
+verification does not approve a different archive because the git SHA happens to match.
+See the [release checklist](../releases/README.md#release-validation-checklist).
+
+### 6.3 Primary vs supplementary evidence
 
 Primary: API read-back rows, raw tool calls/results from the client stream, hook logs, on-disk
 receipts (cache/spool counts, codex turn dirs, capture-client marker). Supplementary: the
 assistant's final text (used only where the scenario is about the answer itself: S2, S3, S5, S6, S8).
 
-### 6.3 Determinism controls
+### 6.4 Determinism controls
 
 - Frozen prompts, frozen expected outcomes, and a fixed model per client
-  (`MIDBRAIN_HARNESS_CLAUDE_MODEL`, `MIDBRAIN_HARNESS_CODEX_MODEL`) recorded in `run.json`.
-- Read-back polling with a hard ceiling (default 90 s) and an indexing grace before recall
-  turns (default 20 s) so timing never masquerades as a product failure; both values are recorded.
-- Each cell is retried **zero** times by default. `--retries 1` is allowed for triage and is
-  flagged in the report; a cell that passes only on retry is reported as FLAKY, not PASS.
+  (`MIDBRAIN_HARNESS_CLAUDE_MODEL`, `MIDBRAIN_HARNESS_CODEX_MODEL`) recorded in `results.json`.
+- Read-back polling has a hard ceiling (default 90 s), plus indexing grace before recall
+  turns (default 20 s). Both are recorded; timeouts still require infrastructure/product triage.
+- Scenarios have no automatic retry option. Targeted reruns produce separate reports;
+  a passing follow-up never changes an earlier failed result.
 
-### 6.4 Isolation from the host's real configuration
+### 6.5 Isolation from the host's real configuration
 
 Before any child runs, the harness hashes the real-home surfaces from
 `tripwireSurfaces()` **plus** live-client surfaces the existing tripwire does not know about:
@@ -293,7 +343,7 @@ Both modes are implemented in `harness/lib/candidate.mjs` and `harness/lib/regis
 verified offline on 2026-09-07 (installer + adapter inspect + tripwire, no client sessions).
 
 - **dev mode** (`--mode dev`, default): `candidate.json` records `package.json` version,
-  `git rev-parse HEAD`, dirty status and `npm pack --dry-run --json` (file list, integrity, size).
+  `git rev-parse HEAD`, dirty status and an actual `npm pack --json` archive (file list, integrity, size).
   Clients are pointed at the run-owned extracted package by the installer's `--dev` switch.
   MCP and dev shims execute that preserved package, with dependencies installed from the saved
   source lockfile. The source checkout can no longer change the running candidate.
@@ -341,47 +391,46 @@ be exercised against a loopback registry or an rc candidate. Honouring an overri
 `MIDBRAIN_NPM_REGISTRY_URL`, or npm's configured registry) would let the harness prove the
 self-heal path end to end instead of emulating it with the cache clear.
 
-Both lanes consume the same `candidate.json`; every result row embeds its version and SHA.
+Behavioral results contain the frozen candidate identity at run level. Existing programmatic
+CI builds from checkout; joining both lanes to the same release artifact remains workflow work.
 
-## 8. Pipeline and runners
+## 8. Running and deploying the harness
 
+Today this is a repository tool, excluded from the public npm package. Run it locally with
+Node 24 and the prerequisites in [harness/README.md](../../harness/README.md). The local
+stack helper starts the API; the behavioral runner itself does not provision cloud services.
+
+A complete release check currently follows this sequence:
+
+```text
+programmatic CI + exact candidate archive
+  → healthy dedicated API + pinned clients/models
+  → run --mode registry --upgrade --required --interactive
+  → export and verify release evidence against the intended archive and source SHA
+  → Radu review → separately authorized publish
 ```
-freeze candidate ─► npm run check on ubuntu/windows/macos (existing ci.yml)
-                 ─► harness doctor  (self-hosted macOS + linux runners)
-                 ─► harness run --clients claude,codex,opencode,hermes[,nanoclaw] --scenarios all
-                 ─► report.md + evidence bundle uploaded as workflow artifacts
-                 ─► Radu review ─► publish ─► harness run --mode registry --scenarios s9 (post-release smoke)
-```
 
-- `.github/workflows/behavioral.yml` (phase 2): `workflow_dispatch` + release branches; runs on
-  a self-hosted macOS runner (Claude, Codex, OpenCode, Hermes) and a self-hosted Linux runner
-  with Docker (NanoClaw). Secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MIDBRAIN_HARNESS_API_KEY`,
-  `MIDBRAIN_HARNESS_PROJECT_API_KEY`. GitHub-hosted runners keep the programmatic lane only.
-- Local mock-up (now): this Mac, `harness/.env` with the same four secrets, `node harness/run.mjs doctor`
-  then `node harness/run.mjs run --clients claude,codex`.
+The complete required run needs a terminal for Codex's native `/hooks` approval. A trust
+bypass does not satisfy persisted approval. A non-interactive job therefore cannot currently
+produce a green complete matrix. Do not introduce an exception waiver to hide this limitation.
 
-## 9. Phasing
+The next deployment should be one manually triggered CI workflow, with a dedicated runner,
+secrets, serialized execution, bounded runtime, health checks, and the selected evidence bundle
+as its artifact. Start on a platform whose client/Docker setup has been validated. Linux
+cloud execution needs that validation first. Automating native approval must preserve the
+before/after capture proof; until then the release gate includes an attended step.
+No behavioral workflow, runner provisioning, or real-npm post-publish smoke mode exists yet.
 
-| Phase | Scope | Exit criterion |
-|---|---|---|
-| 0 (this PR) | `harness/` skeleton, design doc, Claude + Codex + OpenCode + Hermes manifests (OpenCode and Hermes installed run-locally), S1 S2 S3 S5 S6 S7 S8 + install/self-repair checks, report, tripwire, registry mode + upgrade prelude (S9) | `doctor` green on this Mac; `run --clients claude,codex,opencode,hermes` produces a report with real evidence |
-| 1 | First live runs and driver fixes; S4 with a second agent key; OpenCode plugin/process-separation cell; frozen prompts replaced by the maintainer's documented scenarios | four-client matrix green locally |
-| 2 | `behavioral.yml` on a self-hosted macOS runner; report attached to release PRs; product registry-URL override so the built-in self-heal is exercised | release gate enforced for a real release |
-| 3 | NanoClaw driver implemented (pinned v2 runner, native capture, cold wake, resume, legacy fixture); Docker Linux CI and Windows behavioral leg remain | five-client parity table complete |
+## 9. Remaining decisions and release boundaries
 
-## 10. Open decisions for review
-
-1. **Model pinning per client.** Behavioral cells are more stable on a fixed model; the report
-   records it. Proposal: pin Claude and Codex models via env, default to each client's default.
-2. **Permissions in headless mode.** The installer pre-allows the six read-only memory tools for
-   Claude, so no bypass flags are needed. For Codex the harness defaults to
-   `--dangerously-bypass-hook-trust` and tests persisted trust as a separate S10 cell. Confirm.
-3. **Shared vs isolated homes.** Default shared (realistic, exercises cross-client convergence);
-   isolated available for triage. Confirm.
-4. **Prompt ownership.** Draft prompts above are placeholders for the maintainer's frozen set;
-   once supplied they are checked into `harness/scenarios/` and never edited without a version bump.
-5. **Test identity.** One dedicated MidBrain agent per environment (local, runner). Memory
-   written by the harness accumulates; propose a periodic wipe or per-month agent rotation.
+1. Confirm the overview-to-scenario mapping in §5 against the maintainer's separate manual
+   checklist. The supplied overview is mapped; the absent checklist is not assumed covered.
+2. Pin model and client versions before a run. Different pins establish a different tested
+   configuration; cheaper-model failures remain recorded and need triage.
+3. Run the full required gate and obtain Radu's review of all four product changes below.
+   Evidence export is ready; it cannot manufacture a passing run.
+4. Wire the existing command and bundle into a dedicated runner after agreeing how to handle
+   native approval. Broader OS coverage and post-publish upgrade smoke remain separate work.
 
 
 ## NanoClaw implementation boundary
@@ -420,13 +469,20 @@ client-local memory files with Claude, Codex, OpenCode, or Hermes.
 
 ## Release review for the hardening changes
 
-Two product changes require Radu's release review; passing harness checks do not grant that approval:
+Four product changes require Radu's release review; passing harness checks do not grant that approval:
 
 - `f84c5f6`: synchronous Claude Stop hooks and migration from owned asynchronous hooks.
   Capture now completes before one-shot exit, within the existing 30-second timeout.
 - `5b1f1fe`: one-layer decoding of recognized NanoClaw user transport envelopes, including
   legacy opener recovery. Stored human text changes; native transcript evidence is retained.
 
-The harness is a separate commit. NanoClaw formatting retries are a documented exception
+- `477bd79`: managed rules prioritize MidBrain recall before local files and preserve full
+  retrieval IDs. Startup migrates recognized generated blocks on detected client surfaces;
+  custom rules are preserved. This changes agent instructions, not just harness prompts.
+- `03b6271`: OpenCode tracks pending capture work and drains it during native plugin `dispose`,
+  bounded to 30 seconds. Normal chat stays asynchronous; shutdown can wait. Verified with
+  OpenCode 1.18.29; older clients without `dispose` are not established by that proof.
+
+Harness changes remain separate from these product release decisions. NanoClaw formatting retries are a documented exception
 only to one-reply-per-input expectations; every observed native reply still needs exactly
 one capture. A required matrix report records failures and blocked cases without waivers.

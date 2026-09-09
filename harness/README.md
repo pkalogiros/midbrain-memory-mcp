@@ -156,3 +156,32 @@ avoid simultaneous cold npm installs by MCP and capture hooks. Upgrade validatio
 explicitly clears each group's `_npx` resolution cache before checking the new version.
 Hermes acceptance, OpenCode capture without MCP, Claude hook order, and NanoClaw
 lifecycle have explicit cases. CI/release integration remains separate work.
+
+## Export release evidence
+
+After a run finishes, export a review directory outside the private run home:
+
+```bash
+node harness/scripts/release-evidence.mjs export /path/to/completed-run /path/to/new-bundle
+node harness/scripts/release-evidence.mjs verify /path/to/new-bundle /path/to/release.tgz FULL_SOURCE_SHA
+```
+
+The standalone exporter does not run clients or alter the original run. It writes a
+regenerated report, redacted results/candidate identity, selected normalized evidence,
+and a manifest of SHA-256 checksums. Credentials, raw transcripts, databases, installer
+logs and package archives stay private. Exact prompts, tool calls/results, API readbacks
+and the native approval receipt are included when available. Inspect the bundle before
+sharing; redaction handles known secrets and common patterns, not arbitrary sensitive text.
+Upload this directory as a workflow artifact, or archive the directory for manual sharing.
+
+Export exit 0 means the bundle was created. Failed/focused/dirty-source runs are useful
+**checkpoints** and can be exported. Verification exits 0 only for a complete passing
+required matrix with clean isolation, recorded model/client versions, matching checksums,
+and the supplied full source SHA and exact release archive. An RC-version rewrite changes
+the archive hash; a differently versioned repack cannot inherit the old report's sign-off.
+Verification does not replace programmatic CI or Radu's review, and checksums are not signatures.
+
+Do not export `results.partial.json` or treat an interruption report as a completed run.
+The [coverage map](../docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership)
+distinguishes current checks from unvalidated or missing coverage. Follow the
+[release validation checklist](../docs/releases/README.md#release-validation-checklist).

@@ -9,6 +9,28 @@ Each release can have three files:
 - `vX.Y.Z-light.md`: shorter announcement draft.
 - `vX.Y.Z-tldr.md`: shortest digest.
 
+## Release validation checklist
+
+For changes covered by the multi-client harness:
+
+1. Select the release source SHA, candidate archive and pinned client/model configuration.
+   Run programmatic CI for that source; retain the passing OS jobs in the release review.
+2. Run `node harness/run.mjs run --mode registry --upgrade --required --interactive`
+   against a healthy dedicated test API. Native Codex hook approval currently needs a terminal.
+3. Export the completed run using
+   `node harness/scripts/release-evidence.mjs export <run> <new-bundle>`.
+   Review the redacted bundle before attaching it to the release review; never upload the run home.
+4. Run `node harness/scripts/release-evidence.mjs verify <bundle> <release.tgz> <full-source-sha>`.
+   Require exit 0. This checks the complete behavioral gate and matches the exact intended
+   release archive. An RC-only report does not approve a stable-version repack.
+5. Obtain Radu's product review, including the
+   [four harness-discovered product changes](../testing/multi-client-harness.md#release-review-for-the-hardening-changes).
+   Record remaining coverage boundaries from the [coverage map](../testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership).
+6. Publishing remains a separate authorized release action. No automated behavioral workflow
+   enforces this checklist yet; no real-npm post-publish upgrade smoke mode exists yet.
+
+Focused passes and incomplete/blocked reports are checkpoints, not release approval.
+
 Latest releases:
 
 - [v0.4.10 full](v0.4.10.md), [light](v0.4.10-light.md), [TLDR](v0.4.10-tldr.md)
