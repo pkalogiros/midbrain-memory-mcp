@@ -40,7 +40,6 @@ export function collectCiEvidence({ root, output, sha, suite, secrets = [] }) {
     error = true;
     summary.push('**Evidence collection failed.** No bundle was uploaded; inspect the runner before teardown if private diagnostics are needed.');
   }
-  if (suite === 'required') summary.push('', 'Unattended Codex native hook approval is not implemented. That case remains BLOCKED; it is never waived.');
   fs.writeFileSync(path.join(output, 'summary.md'), summary.join('\n') + '\n');
   return { verified, bundle, error };
 }

@@ -162,6 +162,7 @@ async function run(flags) {
       keep: Boolean(flags.keep),
       required: Boolean(flags.required),
       interactive: Boolean(flags.interactive),
+      approveCodexHooks: Boolean(flags['approve-codex-hooks']),
       upgrade,
     },
   });

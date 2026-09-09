@@ -143,10 +143,10 @@ native and synchronous; there is no fallback hook replay.
 
 For the complete required matrix, use `run --mode registry --upgrade --required`.
 This rejects client/scenario subsets; FAIL, BLOCKED, and SKIP all exit nonzero.
-Add `--interactive` when running in a terminal to complete Codex persisted hook
-approval. The harness first verifies capture is absent, opens Codex for `/hooks`
+Add `--approve-codex-hooks` on Linux/macOS to automate native Codex hook approval
+(Python 3 and Codex 0.150.1 required), or `--interactive` for manual terminal approval. The harness first verifies capture is absent, opens Codex for `/hooks`
 approval, then verifies capture in a new process without the trust bypass. Approve
-only the three installed MidBrain hooks and exit with `/quit`. Without this flag,
+only the three installed MidBrain hooks and exit with `/quit`. Without either flag,
 the approval cell remains BLOCKED. Claude cold-first-turn coverage creates a
 separate fresh home when the main home has already run an upgrade prelude.
 
@@ -191,4 +191,5 @@ distinguishes current checks from unvalidated or missing coverage. Follow the
 A manual [behavioral workflow](../.github/workflows/behavioral.yml) is implemented with
 smoke/required suites, pinned models/clients, selected artifacts and scoped cleanup.
 It has not been deployed or run in the cloud. See [runner and secret setup](../docs/testing/behavioral-ci.md).
-The required suite retains the native Codex approval check and cannot yet pass unattended.
+The required suite uses `--approve-codex-hooks` and retains the before/after capture proof.
+Native approval automation is implemented; a full unattended Linux run still needs validation.

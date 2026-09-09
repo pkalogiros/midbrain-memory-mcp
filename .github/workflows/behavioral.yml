@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Smoke, or full required matrix (Codex native approval currently remains BLOCKED)'
+        description: 'Smoke, or full required matrix with native Codex hook approval'
         type: choice
         options: [smoke, required]
         default: smoke
@@ -95,6 +95,7 @@ jobs:
           JS
           command -v uv >/dev/null
           command -v git >/dev/null
+          command -v python3 >/dev/null
           docker info >/dev/null
           node harness/run.mjs doctor > "$MIDBRAIN_HARNESS_ROOT/doctor.log" 2>&1
 
@@ -110,7 +111,7 @@ jobs:
           set -euo pipefail
           case "$MIDBRAIN_CI_SUITE" in
             smoke) args=(--mode registry --scenarios s01,s06) ;;
-            required) args=(--mode registry --upgrade --required) ;;
+            required) args=(--mode registry --upgrade --required --approve-codex-hooks) ;;
             *) exit 2 ;;
           esac
           # Full output is private; the next step exports selected redacted evidence.

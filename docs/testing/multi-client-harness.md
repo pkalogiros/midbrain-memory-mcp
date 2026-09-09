@@ -177,7 +177,9 @@ credit calls from an earlier resumed turn.
 Claude's cold-first-turn case creates a separate fresh home and npm cache when an
 upgrade prelude has already warmed the main home. S1 in that warmed home is not
 credited as cold-start evidence. Codex's persisted-approval case opens the native
-UI with `--interactive`, then checks capture in a fresh process without the bypass.
+UI with `--interactive` or automates that UI with `--approve-codex-hooks`, then checks
+capture in a fresh process without the bypass. Automation requires Codex 0.150.1 and Python 3;
+it validates the discovered definitions and their persisted hashes through `hooks/list`.
 
 All children receive a **scrubbed env**: `HOME`/`USERPROFILE` → run home; `TMPDIR`/`TEMP`/`TMP`
 → `<run>/tmp`; `CODEX_HOME`, `HERMES_HOME`, `npm_config_cache` inside the
@@ -405,22 +407,22 @@ A complete release check currently follows this sequence:
 ```text
 programmatic CI + exact candidate archive
   → healthy dedicated API + pinned clients/models
-  → run --mode registry --upgrade --required --interactive
+  → run --mode registry --upgrade --required --approve-codex-hooks
   → export and verify release evidence against the intended archive and source SHA
   → Radu review → separately authorized publish
 ```
 
-The complete required run needs a terminal for Codex's native `/hooks` approval. A trust
-bypass does not satisfy persisted approval. A non-interactive job therefore cannot currently
-produce a green complete matrix. Do not introduce an exception waiver to hide this limitation.
+The required run automates Codex's native hook browser with `--approve-codex-hooks`
+on Linux/macOS. Manual `--interactive` approval remains available. Both paths keep the
+no-capture-before/capture-after checks; a trust bypass does not satisfy persisted approval.
 
 A manually triggered [behavioral workflow](../../.github/workflows/behavioral.yml) is now built
 with pinned clients/models, serialized execution, bounded runtime, health checks, selected
 evidence artifacts and scoped cleanup. It is not deployed or cloud-validated. See
 [setup and execution boundaries](behavioral-ci.md). Linux execution needs validation first.
-Automating native approval must preserve the before/after capture proof; until then the
-required workflow records the blocked case and remains red. Runner provisioning and a
-real-npm post-publish smoke mode are not implemented.
+Native approval automation preserves the before/after capture proof; its presence does
+not establish a passing required matrix. Runner provisioning and a real-npm post-publish
+smoke mode are not implemented.
 
 ## 9. Remaining decisions and release boundaries
 

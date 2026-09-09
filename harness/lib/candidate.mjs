@@ -57,7 +57,7 @@ export async function freezeCandidate({ mode = 'dev', directory } = {}) {
   cpSync(path.join(REPO_ROOT, 'package-lock.json'), path.join(repoRoot, 'package-lock.json'));
   command('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], repoRoot);
   const harnessDir = path.join(dir, 'harness');
-  const harnessFiles = snapshotFiles(HARNESS_DIR, { include: file => /\.(mjs|json|ts)$/.test(file) || path.basename(file) === 'Dockerfile' });
+  const harnessFiles = snapshotFiles(HARNESS_DIR, { include: file => /\.(mjs|json|ts|py)$/.test(file) || path.basename(file) === 'Dockerfile' });
   for (const rel of Object.keys(harnessFiles)) {
     const target = path.join(harnessDir, rel);
     mkdirSync(path.dirname(target), { recursive: true });

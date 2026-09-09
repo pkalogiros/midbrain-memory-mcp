@@ -4,12 +4,18 @@
 runs. It has not been deployed, dispatched, or validated on a cloud runner. The existing
 programmatic CI remains separate.
 
-Local validation (2026-09-09): actionlint 1.7.12, Bash syntax checks for all eight shell
-steps, lint and the five CI evidence tests passed. The full suite is not green in this
-parallel-work session: its first attempt passed all 1,307 tests but detected host-config
-drift; the final single-worker attempt passed 1,306 and hit the existing NanoClaw legacy-wake
-test's five-second timeout (`tests/nanoclaw-topology.e2e.test.mjs:467`). No timeout or
-isolation assertion was weakened. A clean full check and real Linux execution remain pending.
+Local validation (2026-09-09): the native approval driver passed against Codex 0.150.1
+in six fresh macOS homes, using a placeholder key and no model prompts. It rejects
+already-trusted hooks; scenario tests retain both capture checks and reject failed approval.
+`MIDBRAIN_TEST_CODEX_APPROVAL=1 VITEST_MAX_WORKERS=4 npm run check` passed
+(1,324 tests plus 224 copied-topology isolation checks); actionlint
+1.7.12 and Bash syntax checks for all eight shell steps passed. This supersedes the earlier
+local timeout/drift checkpoint. Linux execution and a full unattended required run remain
+unvalidated. Reproduce the optional native CLI check with:
+
+```sh
+MIDBRAIN_TEST_CODEX_APPROVAL=1 npx vitest run tests/harness-codex-approval.test.mjs
+```
 
 ## What the button will do
 
@@ -20,7 +26,7 @@ See [GitHub's manual-run documentation](https://docs.github.com/en/actions/how-t
 | Suite | Command | Interpretation |
 |---|---|---|
 | `smoke` (default) | `run --mode registry --scenarios s01,s06` | All five clients: capture and answer cleanliness. A green smoke is a checkpoint, not release approval. |
-| `required` | `run --mode registry --upgrade --required` | Complete matrix with upgrades. Native Codex approval currently remains BLOCKED without a terminal, so this unattended job cannot yet produce release sign-off. |
+| `required` | `run --mode registry --upgrade --required --approve-codex-hooks` | Complete matrix with upgrades and native Codex approval automation. Requires a passing complete report before release sign-off. |
 
 Models: Haiku 4.5 by default, or Sonnet 5 for the four Anthropic-backed clients. Codex uses
 the pinned `gpt-5.6-sol` model with **OpenAI API billing**, not a personal ChatGPT login.
@@ -41,7 +47,7 @@ against the checked-out source SHA and the exact run-owned tested archive.
 ## Provisioning needed later
 
 1. Register a dedicated Linux runner with labels `self-hosted`, `linux`, `midbrain-behavioral`.
-   Install Git, Bash, tar, npm prerequisites, uv, and working Docker. Node is installed by the
+   Install Git, Bash, tar, Python 3, npm prerequisites, uv, and working Docker. Node is installed by the
    workflow. Allow access to npm/PyPI/GitHub, image registries, provider APIs and the test API.
    Validate NanoClaw and client behavior on this Linux runner before treating it as supported.
 2. Use a dedicated runner account with its home outside `/tmp` and no personal client logins
@@ -77,5 +83,10 @@ or unavailable Docker daemon can prevent container cleanup; VM disposal is the f
 Public tool/image caches are retained. No broad Docker prune or shared-home deletion occurs.
 
 The workflow does not publish packages, create releases, or merge branches. A full green
-unattended release gate still needs native Codex approval automation that preserves the
-before/after capture checks. An approval bypass or a waived cell is not equivalent evidence.
+unattended release gate still needs validation on Linux. `--approve-codex-hooks` checks
+the exact three installed definitions through Codex, drives its native hook browser through
+a Python 3 standard-library PTY, and checks persisted trust in a fresh Codex process.
+The scenario still requires no capture before approval and capture afterward without
+the bypass. A changed client version, unexpected hook, UI timeout, or changed hash fails
+closed. Only the selected approval receipt enters the evidence bundle; raw terminal
+output remains private. No trust file is fabricated and no cell is waived.

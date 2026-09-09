@@ -7,6 +7,7 @@ import { spawnCapture, whichSync } from '../lib/proc.mjs';
 import { childEnv } from '../lib/context.mjs';
 import { BlockedError } from '../lib/checks.mjs';
 import { copyTree } from '../lib/evidence.mjs';
+import { approveCodexHooks } from '../lib/codex-approval.mjs';
 
 const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
 
@@ -116,7 +117,8 @@ export default {
     writeFileSync(cfg, text);
   },
 
-  async approveHooks(ctx, project) {
+  async approveHooks(ctx, project, evidenceDir) {
+    if (ctx.options.approveCodexHooks) return approveCodexHooks(ctx, project, this.clientEnv(ctx), evidenceDir);
     if (!ctx.options.interactive || !process.stdin.isTTY) return null;
     console.error('Approve only the three MidBrain hooks in /hooks, then exit Codex with /quit. The next turn verifies persisted approval without a bypass.');
     const args = ['--no-alt-screen', '-C', project];

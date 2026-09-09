@@ -55,6 +55,9 @@ describe('release evidence bundle', () => {
       rawPath: path.join(f.run, 'home/private.json'),
     });
     write(path.join(f.run, f.evidence.replace('.json', '.readback.json')), [{ text: 'MBH-TEST', role: 'assistant' }]);
+    const receipt = path.join(path.dirname(f.evidence), 'approval-ui.txt');
+    write(path.join(f.run, receipt), 'Native approval current-provider-secret');
+    write(path.join(f.run, path.dirname(f.evidence), 'approval-terminal.log'), 'private terminal current-provider-secret');
     const exported = exportBundle(f.run, f.bundle, ['current-provider-secret']);
     expect(exported.problems).toEqual([]);
     expect(verifyBundle(f.bundle, f.archive, f.sha)).toEqual([]);
@@ -63,6 +66,8 @@ describe('release evidence bundle', () => {
     expect(text).toContain('MBH-TEST');
     expect(fs.readFileSync(path.join(f.bundle, f.evidence.replace('.json', '.readback.json')), 'utf8')).toContain('MBH-TEST');
     expect(fs.existsSync(path.join(f.bundle, 'home'))).toBe(false);
+    expect(fs.readFileSync(path.join(f.bundle, receipt), 'utf8')).toBe('Native approval [REDACTED]');
+    expect(fs.existsSync(path.join(f.bundle, path.dirname(f.evidence), 'approval-terminal.log'))).toBe(false);
     expect(fs.existsSync(path.join(f.bundle, f.evidence.replace('.json', '.ndjson')))).toBe(false);
     expect(fs.readFileSync(path.join(f.bundle, 'manifest.json'), 'utf8')).toContain('turn-1.ndjson');
     expect(() => exportBundle(f.run, f.bundle)).toThrow('already exists');

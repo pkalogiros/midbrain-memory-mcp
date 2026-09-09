@@ -81,9 +81,12 @@ async function hookTrustPersisted({ ctx, api, client, project, scenarioId }) {
   ctx.writeJson(file, rb);
   const evidence = [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)];
   const checks = [...turnChecks(t), check('unapproved hooks produce no capture', rb.rows.length === 0 && rb.timedOut, `rows=${rb.rows.length}`)];
-  const approved = await client.approveHooks?.(ctx, project);
+  const evidenceDir = ctx.evidenceDir(client.id, scenarioId);
+  const approved = await client.approveHooks?.(ctx, project, evidenceDir);
+  const receipt = path.join(evidenceDir, 'approval-ui.txt');
+  if (existsSync(receipt)) evidence.push(relEvidence(ctx, receipt));
   if (approved === null || approved === undefined) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected, evidence, checks,
-    blockedReason: 'Run with --interactive in a terminal to approve the installed MidBrain hooks through /hooks. Bypass is not persisted approval.' });
+    blockedReason: 'Use --approve-codex-hooks for native UI automation, or --interactive in a terminal for manual /hooks approval. Bypass is not persisted approval.' });
   const afterMarker = m + '-approved';
   const afterSince = sinceNow();
   const after = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${afterMarker}`, scenarioId, label: 'after-approval', hookTrust: 'persisted' });
@@ -92,7 +95,7 @@ async function hookTrustPersisted({ ctx, api, client, project, scenarioId }) {
   ctx.writeJson(afterFile, observed);
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected,
     evidence: [...evidence, relEvidence(ctx, after.jsonPath), relEvidence(ctx, afterFile)],
-    checks: [...checks, check('interactive approval session exited successfully', approved === 0), ...turnChecks(after),
+    checks: [...checks, check('native approval session exited successfully', approved === 0), ...turnChecks(after),
       ...captureCountChecks(observed.rows, after), ...metadataChecks(observed.rows, client.expectedCaptureLabel, after.captureCwd, after.sessionId)] });
 }
 
