@@ -4,6 +4,9 @@ Launches **real** client sessions (Claude Code, Codex, OpenCode, Hermes, and Nan
 frozen candidate, drives frozen prompts, and scores raw evidence (API read-back, tool calls,
 hook logs) into a side-by-side parity report. Design: `docs/testing/multi-client-harness.md`.
 
+Start with the [architecture and operator guide](../docs/testing/harness-how-it-works.md)
+for diagrams, the file map, setup and run recipes, results parsing, and release evidence.
+
 ## Quick start (this machine)
 
 ```bash

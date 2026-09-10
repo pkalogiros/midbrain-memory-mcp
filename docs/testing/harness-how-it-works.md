@@ -1,8 +1,12 @@
-# The multi-client harness: how it works, what each file does, how to run it automatically
+# Multi-client testing: architecture, operation and release evidence
 
 Companion to the [design and coverage map](multi-client-harness.md),
 [CLI commands](../../harness/README.md), and [workflow setup](behavioral-ci.md).
 Updated 2026-09-09 against branch `multi-client-test-harness`.
+
+Start with [architecture](#architecture) to understand the system, [local setup](#local-setup)
+to prepare a machine, [run recipes](#choose-and-run-a-suite) to execute it, or
+[reading results](#how-to-read-and-parse-results) to investigate an existing run.
 
 ## What it is
 
@@ -20,6 +24,89 @@ release: the complete required matrix still needs to pass on the intended candid
 
 NanoClaw coverage uses its upstream runner through the local mailbox; external messaging
 integrations and the full host dispatcher are not exercised.
+
+## Architecture
+
+There are two complementary test lanes. The existing programmatic suite checks installation,
+configuration, credentials, tools, repair, recovery, packaging and isolation in code. Its
+[CI workflow](../../.github/workflows/ci.yml) runs tests on Linux, macOS and Windows.
+The behavioral harness checks whether real clients actually capture and use memory in
+model sessions. A green programmatic suite does not establish a green behavioral matrix.
+
+```mermaid
+flowchart TB
+    Source["Candidate checkout"] --> Unit["Programmatic tests: tests/"]
+    Unit --> OS["CI: Linux, macOS, Windows"]
+    Source --> Freeze["Freeze package and harness inputs"]
+    Freeze --> Install["Product installer"]
+    subgraph Private["Private run directory on one machine"]
+        Install --> Home["Isolated home and test projects"]
+        Home --> Clients["OpenCode, Claude, Codex, Hermes"]
+        Home --> Nano["NanoClaw upstream runner in Docker"]
+        Clients --> Product["Candidate MCP server and native capture hooks"]
+        Nano --> Product
+        Evidence["Prompts, turns, API readback, logs"] --> Score["Deterministic checks"]
+        Score --> Report["results.json and report.md"]
+    end
+    Clients <--> Models["Model provider APIs"]
+    Nano <--> Models
+    Product <-->|"Capture and recall"| API["Dedicated MidBrain test API"]
+    API -->|"Read-only verification"| Evidence
+    Clients --> Evidence
+    Nano --> Evidence
+    Report --> Export["Select evidence and redact known secrets"]
+    Export --> Bundle["Shareable review bundle"]
+    Bundle --> Verify["Verify against exact release archive and source SHA"]
+```
+
+The harness controls prompts and collects evidence; the **product** performs memory writes
+and retrieval. Its verification API client reads stored rows independently. This separates
+“the assistant said it remembered” from “the right value appeared in a successful memory
+tool result and in the answer.” Both the provider APIs and the memory backend are real in
+a behavioral run. A local memory backend removes the MidBrain cloud dependency, but client
+model calls still use their configured providers.
+
+### Why these boundaries exist
+
+| Boundary | Reason |
+|---|---|
+| Product adapters vs harness manifests | Product adapters install and repair integrations; harness manifests launch clients and interpret their evidence. Client CLI changes should stay in the driver. |
+| Frozen package vs live checkout | Sessions execute preserved candidate bytes, so an edit during a long run cannot silently change the tested product. Recorded input changes fail checks. |
+| Private home vs real home | Configuration, credentials, projects and caches belong to this run. A before/after tripwire detects changes to enumerated host surfaces. It is detection, not a security sandbox. |
+| Native hooks vs verification readback | Hook execution must come from the client. Readback proves what reached the API; the harness does not replay a failed hook to manufacture a pass. |
+| Scenarios vs scoring vs rendering | Prompts exercise behavior, checks evaluate evidence, and the report displays those checks. Export reuses the same results and renderer. |
+| Private run vs shareable bundle | Debugging needs detailed local evidence. Review needs selected, redacted evidence and candidate identity, without credential-bearing homes. |
+
+### Capture and cross-client recall, end to end
+
+This illustrates one S2 pair. The hidden value is supplied only to the writer; the reader
+gets the retrieval anchor. A new reader session prevents conversation history from supplying
+the answer. S1 separately checks capture counts and metadata in detail.
+
+```mermaid
+sequenceDiagram
+    participant H as Harness scenario
+    participant W as Writer client
+    participant P as Product hooks / MCP
+    participant A as MidBrain test API
+    participant R as Fresh reader client
+    H->>W: Anchor plus hidden value
+    W->>P: Native user / assistant capture events
+    P->>A: Store episodic memories
+    H->>A: Poll readback and wait for capture stability
+    A-->>H: Stored rows and metadata
+    H->>R: Ask for the anchor, omit hidden value
+    R->>P: Memory retrieval tool call
+    P->>A: Search memory
+    A-->>P: Matching stored content
+    P-->>R: Tool result containing hidden value
+    R-->>H: Final answer and native tool evidence
+    H->>H: Check successful retrieval, answer and rule compliance
+    H->>H: Save cells and evidence references
+```
+
+Model behavior remains variable. Deterministic scoring means the same evidence receives
+the same checks; it does not promise identical answers, tokens or latency on every run.
 
 ## One run, step by step
 
@@ -61,6 +148,27 @@ integrations and the full host dispatcher are not exercised.
    full client/scenario selection. A focused green run is only a checkpoint.
 
 ## What each file does
+
+All paths below are relative to this repository. The harness is development tooling;
+`package.json` does not include `harness/` in the published npm package.
+
+### Product under test
+
+| Location | Responsibility and why it matters to testing |
+|---|---|
+| [index.js](../../index.js), [mcp.mjs](../../mcp.mjs) | CLI/MCP entry point and tool handlers. These are the actual tools invoked by client sessions. |
+| [install.mjs](../../install.mjs), [shared/clients/](../../shared/clients/) | Installation, credential resolution, configuration and self-repair. Harness setup calls this product code instead of maintaining a second installer. |
+| [shared/midbrain-api.mjs](../../shared/midbrain-api.mjs) | Product HTTP access to memory. Separate from the harness's read-only verification client. |
+| [shared/agent-rules.mjs](../../shared/agent-rules.mjs) | Managed memory-first instructions. Behavioral compliance checks measure whether clients follow them. |
+| [plugins/claude-code/](../../plugins/claude-code/), [plugins/codex/](../../plugins/codex/), [plugins/hermes/](../../plugins/hermes/) | Native capture handlers invoked by each client. |
+| [plugins/opencode/midbrain-memory.ts](../../plugins/opencode/midbrain-memory.ts), [dist/midbrain-shared.mjs](../../dist/midbrain-shared.mjs) | OpenCode plugin and built runtime bundle, including capture completion at shutdown. |
+| [skills/nanoclaw/](../../skills/nanoclaw/) | Product integration instructions/configuration for a NanoClaw group. NanoClaw uses the Claude capture handlers with its own client identity. |
+
+Four product changes accompanied this testing work and require release review separately
+from the harness: synchronous Claude Stop plus migration (`f84c5f6`), recognized NanoClaw
+envelope decoding (`5b1f1fe`), managed memory-first/full-anchor rules (`477bd79`), and OpenCode
+capture draining during plugin disposal (`03b6271`). See the
+[release review boundaries](multi-client-harness.md#release-review-for-the-hardening-changes) for details.
 
 ### Entry point and libraries
 
@@ -123,6 +231,32 @@ client-specific behavior can require additional cases; those are declared by the
 | `s10-client-specific.mjs` | Self-repair of a stale shim, cold first turn in a fresh home, Claude hook ordering, Codex persisted trust, Hermes consent, OpenCode plugin without MCP. |
 | `nanoclaw-lifecycle.mjs` | NanoClaw cold wake, continuation resume across containers, legacy opener recovery. |
 
+S7 is the memory-first/full-anchor compliance checks used inside S2, S3 and S5; there is
+no separate S7 driver to select. S4 uses two different test agents and scoped projects;
+its current reader turns do not cover every possible direction of scope leakage. See the
+[coverage map](multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership) for precise
+assertions and gaps relative to the maintainer's manual scenarios.
+
+### NanoClaw's container boundary
+
+The manifest drives the pinned upstream v2 runner at
+`6656b326a900dcfba4be8ca76412d954cfc915b5`. The local SQLite mailbox replaces messaging
+delivery, while the upstream Claude provider, SDK, MCP connection and hook execution run
+normally. Each turn gets a new container. Resumed sessions preserve their continuation and
+durable group state, including `.claude-shared` and npm cache mounts. The model's project is
+`/workspace/agent`, with isolated agent files rather than host project files.
+
+Linux defaults to Docker host networking for the loopback registry; Docker Desktop uses
+`host.docker.internal`. A custom network or remote Docker daemon needs reachable API/registry
+URLs and valid host bind mounts; the overrides are in [the env template](../../harness/.env.example).
+The first run may clone source and build an image. `nanoclaw.json` records source/image identity.
+
+NanoClaw can produce another native assistant reply while retrying response formatting.
+Capture checks expect one capture per distinct native reply. This is a documented client
+exception, not permission to ignore duplicate captures. The lane excludes Slack/WhatsApp
+delivery, host routing, OneCLI provisioning and other NanoClaw providers. Its legacy case
+reconstructs the old missing-shim/marker configuration, not an entire historical deployment.
+
 ### Tests and docs
 
 `tests/harness-lib.test.mjs`, `harness-scoring.test.mjs`, `harness-nanoclaw.test.mjs`,
@@ -131,6 +265,7 @@ isolation logic without model calls. `tests/fixtures/nanoclaw/` holds the upstre
 schema. `tests/harness-codex-approval.test.mjs` covers approval guards and offers an
 opt-in real-CLI check without model calls; `harness-release-evidence.test.mjs` and
 `harness-ci-evidence.test.mjs` cover export, redaction and gate preservation.
+`tests/harness-simple.test.mjs` covers cycle selection, unavailable clients and mode labels.
 The [design](multi-client-harness.md) records coverage limits and manual-checklist gaps;
 [validation notes](validation-2026-09-08.md) preserve earlier run outcomes.
 
@@ -147,15 +282,348 @@ The [design](multi-client-harness.md) records coverage limits and manual-checkli
   registry/, nanoclaw.json     loopback registry state; NanoClaw image and source identity
 ```
 
-## Configuration
+Local runs retain this directory for investigation. Normal completion, handled interruption
+and timeout cleanup stop the registry and remove run-owned NanoClaw containers; images remain
+cached. A killed process or failed host may prevent cleanup. Test memories also remain in the
+dedicated backend agents. Neither local run directories nor backend memory are automatically
+deleted after a successful local run.
 
-`harness/.env` (gitignored, copy from `.env.example`): `MIDBRAIN_HARNESS_API_KEY` and
-`MIDBRAIN_HARNESS_PROJECT_API_KEY` (two dedicated test agents), `MIDBRAIN_HARNESS_API_URL`,
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MIDBRAIN_HARNESS_CODEX_AUTH=chatgpt`, model pins per
-client, client version pins, timeouts, run root. Cost depends on actual tokens, model pins,
-caching and native retries. Historical runs are not a fixed-price estimate for the next run.
-In the workflow, Codex uses OpenAI API billing and the other four clients use Anthropic.
-GitHub runner charges are separate.
+## Local setup
+
+The commands in this page run from the repository root in Bash/zsh on macOS or Linux.
+Use Node 24 for the complete harness (NanoClaw uses `node:sqlite`), npm, Git, Python 3,
+`uv`, and a working Docker daemon. The product itself supports Node 20+, but that is not
+the prerequisite for the complete test harness. These instructions do not establish Windows
+behavioral support; the programmatic CI OS matrix is separate.
+
+### 1. Install dependencies and pinned client CLIs
+
+The following installs Claude/Codex into a harness-owned directory rather than changing
+global client installations. OpenCode and Hermes are installed by their adapters per run;
+Hermes includes its required MCP extra. Network access to package/image registries, upstream
+NanoClaw source, the model providers and the test API is needed.
+
+```bash
+npm ci
+export MIDBRAIN_HARNESS_ROOT="$HOME/.midbrain-harness"
+npm install --prefix "$MIDBRAIN_HARNESS_ROOT/clients" --no-audit --no-fund --no-save \
+  @anthropic-ai/claude-code@2.1.258 @openai/codex@0.150.1
+export PATH="$MIDBRAIN_HARNESS_ROOT/clients/node_modules/.bin:$PATH"
+node --version
+python3 --version
+uv --version
+docker info
+```
+
+Keep the run root outside `/tmp` and other temporary directories: product self-repair skips
+temporary installations. These pins match the checked-in behavioral workflow at this page's
+update date. Review changes to the pins together with the relevant adapters.
+
+### 2. Configure dedicated test credentials and the backend
+
+Create the gitignored config only if it does not exist, then edit it locally:
+
+```bash
+if [ ! -e harness/.env ]; then
+  (umask 077; cp harness/.env.example harness/.env)
+fi
+chmod 600 harness/.env
+```
+
+| Setting | What to put there |
+|---|---|
+| `MIDBRAIN_HARNESS_API_URL` | Explicit non-production API URL, reachable from the host and NanoClaw containers. Set it even though local CLI configuration permits a default. |
+| `MIDBRAIN_HARNESS_API_KEY` | Dedicated global test agent key; keys matching real-home key files are refused. |
+| `MIDBRAIN_HARNESS_PROJECT_API_KEY` | A second, different test agent key. Required for S4 and a passing complete matrix. |
+| `ANTHROPIC_API_KEY` | Provider credential for Claude, OpenCode, Hermes and NanoClaw with the model configuration below. |
+| `OPENAI_API_KEY` | Provider credential for Codex in API-key mode. |
+
+The loader fills absent or empty environment variables from `.env`; nonempty shell values
+win. Do not paste secrets into commands or reports. Local Codex optionally supports
+`MIDBRAIN_HARNESS_CODEX_AUTH=chatgpt`, which explicitly copies host login credentials into
+the private run home. The reproducible workflow path uses `apikey` instead.
+
+For the sibling local `memory` repository, these explicit setup operations start its Docker
+stack and create two test agents, writing their keys and API URL into `harness/.env`:
+
+```bash
+bash harness/scripts/local-stack.sh up
+bash harness/scripts/local-stack.sh seed
+bash harness/scripts/local-stack.sh status
+```
+
+Set `MIDBRAIN_MEMORY_REPO` to an absolute path if the backend is not at `../memory`.
+Seed during initial setup; it is not a required step before each test run. Add the provider
+keys afterward. Use `bash harness/scripts/local-stack.sh down` when finished with the local
+backend; data persists. For an existing staging API, configure its dedicated keys directly
+and skip this helper.
+
+### 3. Pin models and check readiness
+
+This configuration matches the workflow's default model choices. Export it in the shell
+used for the run, or place these values in `harness/.env` without the `export` prefix:
+
+```bash
+export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_OPENCODE_MODEL=anthropic/claude-haiku-4-5
+export MIDBRAIN_HARNESS_HERMES_PROVIDER=anthropic
+export MIDBRAIN_HARNESS_HERMES_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_NANOCLAW_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_CODEX_MODEL=gpt-5.6-sol
+export MIDBRAIN_HARNESS_CODEX_AUTH=apikey
+export MIDBRAIN_HARNESS_OPENCODE_VERSION=1.18.29
+export MIDBRAIN_HARNESS_HERMES_VERSION=0.19.0
+export MIDBRAIN_HARNESS_VERDACCIO=verdaccio@6.2.0
+node harness/run.mjs doctor
+```
+
+Inspect **every client's verdict**, the project key and API probe. Doctor can report READY
+with only a subset runnable; its exit code alone does not certify readiness for the required
+matrix. It does not make paid model calls or guarantee model access or provider balance.
+Use `doctor --clients claude,codex` when intentionally preparing only that subset.
+
+Costs depend on model tokens, tool results, context, caching and native retries. A scenario
+can launch several fresh sessions, and a prompt can require several provider calls. A
+report cell is an assertion group, not a billable model call. The four Anthropic clients
+and API-authenticated Codex bill their respective providers; runner costs are separate.
+
+## Choose and run a suite
+
+Start with a programmatic check, then smoke, then simple for broader iteration. Run required
+when collecting complete release evidence. The model-backed commands below incur provider
+usage; `npm run check` does not run a paid behavioral matrix.
+
+| Run | Purpose | Can establish the full required gate? |
+|---|---|---|
+| Programmatic | Build, lint, tests, docs and isolation gates | Separate prerequisite |
+| Smoke | S1 capture and S6 clean unrelated answers in all five clients | No |
+| Simple | All scenarios and upgrades, with one cross-client cycle | No |
+| Required | All scenarios, upgrades and every ordered cross-client pair | Yes, if complete, all checks pass and evidence verifies |
+| Focused | Selected clients/scenarios while diagnosing a failure | No |
+
+Run each command as a separate operation; these are alternatives, not a script that must
+execute all paid suites in sequence.
+
+```bash
+# Programmatic checks
+VITEST_MAX_WORKERS=4 npm run check
+```
+
+```bash
+# Smoke: all five clients, two scenarios
+node harness/run.mjs run --mode registry --scenarios s01,s06
+```
+
+```bash
+# Simple: all scenarios, reduced cross-client pairing
+node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
+```
+
+```bash
+# Required: full selection, including upgrades and native Codex approval
+node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
+```
+
+```bash
+# Focused: one cross-client comparison in both directions
+node harness/run.mjs run --mode registry --clients codex,nanoclaw --scenarios s02
+```
+
+```bash
+# Focused: previous-release upgrade continuity for Claude
+node harness/run.mjs run --mode registry --upgrade --clients claude --scenarios s09
+```
+
+The default `dev` mode runs the extracted candidate directly. Registry mode exercises npm
+resolution through a loopback Verdaccio registry; it does not publish to public npm. With
+`--upgrade`, the harness captures on the previous published release first, publishes the
+candidate locally, clears resolution caches and verifies upgrade continuity. S9 is blocked
+without registry+upgrade; NanoClaw's legacy S10 case also needs registry mode.
+
+`--required` rejects client/scenario filters and requires registry+upgrade. `--simple` changes
+only S2 pair selection, cannot combine with `--required`, and follows this stable order:
+
+```mermaid
+flowchart LR
+    O["OpenCode"] --> C["Claude"] --> X["Codex"] --> H["Hermes"] --> N["NanoClaw"] --> O
+```
+
+With five clients, simple runs five writer/reader pairs and ten S2 prompts. Full mode runs
+twenty ordered pairs and forty S2 prompts. The thirty-prompt saving applies to S2, not the
+whole run or bill. Subsets form a cycle in the same manifest order; S2 needs at least two
+clients. Unavailable clients keep their place in a simple cycle, and affected links are
+BLOCKED. The planned links are recorded in `run.crossClientPairs`.
+
+`--approve-codex-hooks` requires Python 3 and Codex 0.150.1 on Linux/macOS. It validates the
+three installed MidBrain hooks, drives the native approval UI, and verifies unchanged hook
+hashes and persisted trust in a fresh process. S10 checks no capture before approval and
+capture afterward without bypass. Ordinary turns use the adapter's headless approval/trust
+bypasses; those do not establish persisted trust. Use `--interactive` for manual terminal
+approval instead. Without either option, that S10 case remains blocked.
+
+Default capture readback waits up to 90 seconds, polling every 5 seconds and checking a
+5-second stable capture window; indexing grace is 20 seconds where used. Client turns default
+to a 300-second timeout. These are waiting bounds, not automatic reruns of failed scenarios.
+Tune through the documented env template/CLI flags only when investigating measured delays.
+Record the changed configuration and keep the original failed run.
+
+## How to read and parse results
+
+### Start with the verdict and identity
+
+The run prints the path to `report.md`. Open it, then check:
+
+1. **Identity:** candidate SHA, dirty flag, package version, archive hash, mode and client
+   versions. `results.json` also records model pins in `run.models`. Confirm this is the
+   intended candidate and configuration, not a report from before a fix.
+2. **Completeness and scope:** a finished timestamp and `results.json`, then `run.required`,
+   `run.simple` and selected clients/scenarios. Even a broad run without `--required` is a
+   checkpoint. `results.partial.json` is progress after some scenarios, not completed evidence.
+3. **Isolation:** `results.isolation.ok` must be true, with an empty drift list. The sibling
+   `isolation.json` contains before/after snapshot timestamps and drift, not an `ok` field.
+4. **Matrix:** find the failing row/client, then read every matching entry in **Cell details**.
+   Each matrix square shows the worst status across its underlying cells; one square can
+   include several cross-client readers/writers or client-specific cases.
+
+| Status | Interpretation |
+|---|---|
+| PASS | Every named check in that cell passed. This does not imply every other cell or suite passed. |
+| FAIL | A check failed, including a scenario error. Inspect evidence before attributing it to the product, client or harness. |
+| BLOCKED | A prerequisite or execution dependency prevented validation; the reason is recorded. This is not a pass. |
+| SKIP / FLAKY | Supported report statuses, both non-passing for the run gate. There is no automatic flaky-test detection or rerun scheduler. |
+| — | No cell for that row/client in this run; no coverage claim. |
+
+The run exits **0 only for a nonempty set of all-PASS cells with clean isolation**. Non-PASS
+cells exit 1; handled interruptions have signal exit codes. A focused/simple run can exit 0
+without satisfying release coverage. Preserve the command's failure status in scripts; do
+not turn failures into success with `|| true` or an unchecked pipe to `tail`.
+
+To preserve the result while still printing a useful message in a Bash script:
+
+```bash
+if node harness/run.mjs run --mode registry --scenarios s01,s06; then
+  run_status=0
+else
+  run_status=$?
+fi
+printf 'Harness exit status: %s\n' "$run_status"
+# Perform any local reporting here, then propagate the original result.
+exit "$run_status"
+```
+
+### Parse an existing run without model calls
+
+Set `run_dir` to the directory containing the printed report. This Node snippet works on a
+completed private run or exported bundle and needs no extra JSON utility. It prints identity,
+counts, failed check names and evidence paths, rather than dumping credentials or transcripts.
+It is a diagnostic summary, not a replacement for the release verifier.
+
+```bash
+run_dir="/absolute/path/to/completed-run"
+node --input-type=module - "$run_dir/results.json" <<'JS'
+import { readFileSync } from 'node:fs';
+const r = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+if (!r.run?.finishedAt || !Array.isArray(r.cells)) {
+  throw new Error('Use completed results.json, not partial results');
+}
+const counts = {};
+for (const cell of r.cells) counts[cell.status] = (counts[cell.status] || 0) + 1;
+console.log(JSON.stringify({
+  runId: r.run.runId,
+  candidateSha: r.candidate.sha,
+  archiveSha256: r.candidate.tarballSha256,
+  dirty: r.candidate.dirty,
+  required: r.run.required,
+  simple: r.run.simple ?? false,
+  pairs: r.run.crossClientPairs ?? 'Not recorded by this harness version',
+  models: r.run.models,
+  clients: r.clients.map(c => ({ id: c.id, version: c.version, runnable: c.runnable })),
+  isolationOk: r.isolation.ok,
+  counts,
+}, null, 2));
+for (const c of r.cells.filter(c => c.status !== 'PASS')) {
+  console.log(`\n${c.status}: ${c.client} / ${c.scenario} / ${c.row}`);
+  if (c.blockedReason) console.log(`  Blocked: ${c.blockedReason}`);
+  for (const check of c.checks ?? []) {
+    if (!check.ok) console.log(`  Failed check: ${check.name}`);
+  }
+  for (const file of c.evidence ?? []) console.log(`  Evidence: ${file}`);
+}
+JS
+```
+
+Rebuild a local report from its existing JSON without rerunning clients:
+
+```bash
+node harness/run.mjs report "$run_dir"
+```
+
+This rewrites `report.md` only. Do not edit files inside a checksummed release bundle;
+regenerate a new export from the original run instead.
+
+### Follow a failed cell back to evidence
+
+Each cell contains `row`, `scenario`, `client`, `status`, `checks`, `prompt`, `expected`,
+`evidence`, `notes` and `blockedReason`. Each check has a `name`, boolean `ok` and `detail`.
+Use the cell's relative evidence references under the run directory; filenames differ by
+scenario and not every turn has an API readback.
+
+| Evidence | What to inspect |
+|---|---|
+| `*.prompt.json` | Exact prompt, project, session/resume and turn options. Was the hidden answer withheld from the reader? |
+| Normalized turn `*.json` | Final text, session ID, successful tool calls with inputs/results, process exit, timeout/error state. Did the client actually retrieve the value? |
+| `*.readback.json` | Stored rows, user/assistant splits, timeout/poll information and metadata. Did capture reach the correct test agent and session? Some cases save a different readback shape. |
+| Raw streams and product logs | Native hook failures, startup/packaging errors and parser details when normalized evidence is insufficient. Keep these private. |
+| `candidate.json`, `nanoclaw.json` | Package/source identity and NanoClaw runner/image identity for reproducing an environment-specific failure. |
+
+For example, a failed **Cross-client recall** square can mean the reader never called
+MidBrain, a tool failed, the tool returned irrelevant content, or the final answer omitted
+the retrieved value. Those require different fixes. Compare the failing check with the
+reader's normalized turn and the writer's capture readback before changing prompts or code.
+
+A missing marker in API readback alone does not prove no capture occurred: the native reply
+may have omitted or changed it. Likewise, an API outage does not establish a client defect.
+Check native output and the recorded API errors; use `blockedReason` for dependency failures.
+After fixing the cause, run a focused scenario, retain both run IDs, and finally rerun the
+required matrix on the intended candidate. A focused fix does not rewrite an old failed gate.
+
+## Export and verify release evidence
+
+Export only completed runs into a new directory outside the private run directory:
+
+```bash
+node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
+node harness/scripts/release-evidence.mjs verify \
+  /absolute/path/to/new-bundle /absolute/path/to/exact-tested-release.tgz FULL_SOURCE_SHA
+```
+
+Replace the placeholders with the exact archive and full source SHA intended for release.
+The exporter creates a regenerated report, redacted results/candidate identity, selected
+normalized prompts/turns/readbacks, the safe native approval receipt when present, and a
+checksum manifest. Credential-bearing homes, raw streams, databases, installer logs and
+package archives stay out. Review the bundle before sharing: redaction covers known secrets
+and common patterns, not arbitrary sensitive text in model output.
+
+**Export success means the directory was created. Verification success means the required
+behavioral evidence matches the supplied candidate and passes the verifier's gate.** Failed,
+focused, simple or dirty-source runs can be exported as checkpoints; they cannot pass full
+required verification. The verifier checks bundle integrity, report/result agreement, clean
+source/isolation, required coverage, checks, versions/models and the exact tarball/source hash.
+It reuses the results rather than asking another model to judge them.
+
+```mermaid
+flowchart LR
+    Run["Completed private run"] --> Export["Export selected redacted evidence"]
+    Export --> Bundle["Report, results, evidence, checksums"]
+    Bundle --> Verify["Release verifier"]
+    Archive["Exact release tarball and full source SHA"] --> Verify
+    Verify --> Verdict["Verified required gate or rejection"]
+```
+
+An RC-version rewrite changes archive bytes. A later repack with another version cannot
+inherit this hash match, even when source code looks equivalent. Checksums detect mismatches;
+they are not authorship signatures. Verification complements programmatic CI and Radu's
+review under the [release checklist](../releases/README.md#release-validation-checklist).
 
 ## Running it automatically
 
@@ -176,47 +644,36 @@ The YAML file is the source of truth; there is no second workflow example in thi
   required runs the full registry+upgrade matrix. All preserve failing exit codes.
   Smoke and simple success are not full required sign-off.
 
-From the repository root, with the documented credentials and a durable run root configured:
-
-```sh
-node harness/run.mjs doctor
-node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
-```
-
-For lower-cost iteration, replace `--required` with `--simple`. The five-client cycle is
-OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode: ten cross-client prompts
-instead of forty. Other scenarios remain unchanged. Reports and bundles label the reduced
-coverage; `--simple` cannot be combined with `--required`. Missing clients leave blocked links.
-
-Native approval automation requires Python 3 and Codex 0.150.1 on Linux/macOS. It checks
-exactly three untrusted MidBrain hooks, uses Codex's native UI, and verifies persisted trust.
-The scenario still checks no capture before approval and capture afterward without bypass.
-Use `--interactive` instead for manual terminal approval. There is no waiver for a blocked cell.
+After the workflow is activated, the operator selects a branch, suite and Anthropic model
+under **Actions → Behavioral tests → Run workflow**. The current workflow then installs
+pinned clients, checks prerequisites, executes the selected CLI recipe, exports evidence,
+uploads an artifact and cleans up. It serializes runs across branches to avoid overlapping
+use of the dedicated backend identities. Execution has a 195-minute timeout inside a
+240-minute job budget. Provisioning the runner/backend and activating this button remain
+deployment work; see the linked setup guide.
 
 **Shareable evidence:** the workflow uploads only `summary.md` and the exported, redacted
 `bundle/`, retained for 14 days. Raw `results.json`, streams, logs, databases and run homes
 remain private. Required CI also verifies the bundle against the checked-out source SHA
 and the run's exact candidate archive; successful export alone cannot make a run green.
-For local export and independent release verification:
-
-```sh
-node harness/scripts/release-evidence.mjs export /path/to/completed-run /path/to/new-bundle
-node harness/scripts/release-evidence.mjs verify /path/to/new-bundle /path/to/release.tgz FULL_SOURCE_SHA
-```
-
-Review the redacted bundle before sharing. An RC version rewrite changes archive bytes;
-a differently versioned repack cannot inherit sign-off. The workflow deletes this attempt's
-private root and labelled containers, including its candidate archive; preserving that archive
-for a later release requires a separate private retention decision. No PR/release comments
-or Slack messages are sent by the current workflow.
+An interrupted run receives an incomplete summary, not completed passing evidence. The
+original suite failure stays red even if export succeeds. The workflow deletes this attempt's
+private root and labelled containers, including its candidate archive; preserving that
+archive for later release verification requires a separate private retention decision.
+No PR/release comments or Slack messages are sent by the current workflow.
 
 ## What is validated and what remains
 
-The local full check with native approval enabled passed 1,324 tests plus 224 isolation
-checks, including native Codex approval in fresh macOS homes. This is programmatic and focused integration evidence.
-The latest completed broad behavioral run, `20260909-083452-4fdd`, tested the older
-`6d6fc58` candidate: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation, `required: false`.
-It predates native approval automation and is not release sign-off.
+This is a dated checkpoint, not a live status dashboard:
+
+| Area | Implemented | Recorded validation as of 2026-09-09 |
+|---|---|---|
+| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence and simple-mode tests | After simple mode: 1,332 tests passed, 3 skipped, plus 224 copied-topology isolation checks. |
+| Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Approval driver checked in six fresh macOS homes without model calls; earlier opt-in full check passed 1,324 tests plus 224 isolation checks. Linux remains unvalidated. |
+| Five-client behavioral matrix | All adapters and scenarios described above | Completed broad run `20260909-083452-4fdd`: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate `6d6fc58`; `required: false`. It predates approval automation and simple mode. |
+| Simple cycle | Pair selection, labels, reports, export/CI support | Unit-tested; no recorded live simple matrix yet. |
+| Release evidence | Selected redacted export and strict candidate verification | Export/verifier tests; no complete green required evidence for the intended current candidate. |
+| Manual GitHub workflow | Suite/model inputs, setup, execution, artifacts, cleanup | Built and statically checked; not deployed or run on a cloud runner. Slack alerts are not built. |
 
 Before calling the pipeline release-ready, triage those failures, validate Linux execution,
 and obtain a complete passing required report on the intended candidate plus programmatic
