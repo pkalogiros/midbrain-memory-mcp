@@ -707,9 +707,9 @@ The historical Codex runs used a ChatGPT login; the workflow uses separately bil
 <tr>
 <td>Smoke</td>
 <td>Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode</td>
-<td>About 2 min</td>
-<td>Under $0.15</td>
-<td><code>20260909-083217-0fbb</code>; eight prompts, excludes Codex, differs from five-client workflow smoke.</td>
+<td>2.0 min</td>
+<td>About $0.09</td>
+<td><code>20260910-080525-06d1</code> (32 PASS, on the reuse changes) and <code>20260909-083217-0fbb</code>; eight prompts, excludes Codex, differs from five-client workflow smoke.</td>
 </tr>
 <tr>
 <td>Focused</td>
@@ -720,10 +720,10 @@ The historical Codex runs used a ChatGPT login; the workflow uses separately bil
 </tr>
 <tr>
 <td><strong>Simple (Default)</strong></td>
-<td>Five clients, all scenarios, upgrades, five S2 links</td>
-<td>Not yet measured in a completed run recorded here</td>
-<td>Not yet measured</td>
-<td>Recommended for everyday behavioral checks. Saves 30 S2 prompts; no measured simple/full token-cost ratio.</td>
+<td>Five clients, all scenarios, upgrades, five S2 links; 74 prompts after the reuse and trim changes</td>
+<td>Not yet measured end to end: <code>20260910-073836-9210</code> was aborted by a harness edit mid-run, <code>20260910-080807-b79c</code> stopped by hand; projected about 40 min</td>
+<td>Projected about $1.20</td>
+<td>Recommended for everyday behavioral checks. Reuses S1/S3/S4 evidence from the prelude and leaves two required-only checks to <code>--required</code>.</td>
 </tr>
 <tr>
 <td><strong>Full matrix</strong></td>

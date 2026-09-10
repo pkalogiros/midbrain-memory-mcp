@@ -557,9 +557,9 @@ The historical Codex runs used a ChatGPT login; the workflow uses separately bil
 | Run type | Scope and models | Observed duration | Historical Anthropic spend | Evidence / limitation |
 |---|---|---|---|---|
 | Programmatic | Build, lint, tests, isolation; no models | Varies by machine; recent local checks under 2 min | $0 model usage | Not a behavioral matrix; runner compute still has a cost. |
-| Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | About 2 min | Under $0.15 | `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
+| Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | 2.0 min | About $0.09 | `20260910-080525-06d1` (32 PASS, on the reuse changes) and `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
 | Focused | One/two clients and selected scenarios | Depends on selection; one retained run took about 6 min | Varies | `20260908-090053-5472`; a targeted run is not comparable to full coverage. |
-| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links | Not yet measured in a completed run recorded here | Not yet measured | Recommended for everyday behavioral checks. Saves 30 S2 prompts; no measured simple/full token-cost ratio. |
+| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links; 74 prompts after the reuse and trim changes | Not yet measured end to end: `20260910-073836-9210` was aborted by a harness edit mid-run, `20260910-080807-b79c` stopped by hand; projected about 40 min | Projected about $1.20 | Recommended for everyday behavioral checks. Reuses S1/S3/S4 evidence from the prelude and leaves two required-only checks to `--required`. |
 | **Full matrix** | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | Broader cross-client confidence. `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
 | Required attempt | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
 

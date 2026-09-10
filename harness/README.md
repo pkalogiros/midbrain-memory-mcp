@@ -197,8 +197,10 @@ candidate session, same prompt and project); Claude's hook-ordering case is deri
 native read-back timestamps; S4 reuses S1's global-credential write from proj-a as its global
 marker (the leak check spans the S1 write); and in simple mode only, S3 is scored on the
 prelude's checkpoint write and fresh-session recall on the candidate instead of two more
-prompts. Required mode keeps S3 explicit. A full upgrade matrix is 106 prompts (was 132), a
-simple one 81 (was 102).
+prompts. Simple mode also leaves two required-only checks to `--required`: S4's global
+recall from a directory that never saw the installer (proj-a already proves global-credential
+recall) and Codex persisted hook approval. Required mode keeps all of them. A full upgrade
+matrix is 106 prompts (was 132), a simple one 74 (was 102).
 
 Client subsets form a cycle in the same stable order; at least two clients are needed
 for cross-client recall. Unavailable clients keep their place and affected links are
