@@ -44,7 +44,11 @@ Incomplete runs upload only an incomplete summary. The original failing exit sta
 red; successful export never turns a failed test green. Required runs also verify the bundle
 against the checked-out source SHA and the exact run-owned tested archive.
 
-## Provisioning needed later
+## Current self-hosted runner setup
+
+These settings describe the checked-in workflow. Self-hosting is its current configuration;
+real client binaries, Docker and a run root outside `/tmp` do not by themselves establish
+that a GitHub-hosted VM is unsuitable. The hosted-runner trial below is proposed work.
 
 1. Register a dedicated Linux runner with labels `self-hosted`, `linux`, `midbrain-behavioral`.
    Install Git, Bash, tar, Python 3, npm prerequisites, uv, and working Docker. Node is installed by the
@@ -66,6 +70,34 @@ against the checked-out source SHA and the exact run-owned tested archive.
 | Secret `MIDBRAIN_HARNESS_PROJECT_API_KEY` | Different test agent for project isolation |
 | Secret `ANTHROPIC_API_KEY` | Funded provider key for four clients |
 | Secret `OPENAI_API_KEY` | Funded provider key for Codex |
+
+## Deployment sequence (proposed)
+
+1. Adapt the workflow for a GitHub-hosted `ubuntu-24.04` trial, explicitly installing
+   prerequisites such as `uv`. Validate CPU, memory and disk capacity, Docker, the NanoClaw
+   image and network paths, and the offline native Codex approval check before model calls.
+   Measure whether a larger hosted runner is needed. This adaptation has not been made;
+   the existing YAML still requires the self-hosted labels above.
+2. Choose a healthy staging MidBrain API reachable from both the VM and NanoClaw containers.
+   Configure the environment variable and four secrets listed above. The workflow does not
+   provision the backend, create test agents or expose an API running on a developer's laptop.
+3. Add an optional final Slack notification using an environment secret named
+   `SLACK_WEBHOOK_URL`. Include the suite, candidate commit, outcome and GitHub run link;
+   distinguish smoke success from required-gate success and handle failure/cancellation.
+   Notification delivery must not replace the test verdict. Slack support is not yet built.
+4. After review and explicit authorization, push and merge the workflow to the default
+   branch, then run prerequisite checks and smoke first. Check uploaded redacted artifacts,
+   cleanup and notification delivery. Keep manual triggering while validating the rollout.
+5. Triage the existing behavioral failures using saved evidence and targeted reruns, then
+   run the complete required matrix on the intended candidate. Require clean isolation,
+   every required check passing, and matching evidence. Retain the tested archive privately
+   if it will be needed for later release verification; current cleanup deletes it.
+
+The button is operational when execution, evidence, cleanup and reporting work on the
+chosen runner. Release sign-off additionally requires the passing required matrix,
+programmatic CI and Radu's product review. The latest broad behavioral checkpoint was
+108 PASS / 16 FAIL / 1 BLOCKED on `6d6fc58`, not a passing required result; see the
+[coverage and validation boundary](multi-client-harness.md#implemented-versus-validated).
 
 ## Evidence and cleanup
 

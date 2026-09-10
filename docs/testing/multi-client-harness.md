@@ -7,6 +7,9 @@ This document turns the "multi-client MCP testing overview" into a concrete pipe
 that lives in this repository under `harness/`. It is written against the code as it
 exists today; every path, env var, and hook name below was verified in source.
 
+For a shorter introduction, see [how the harness works](harness-how-it-works.md).
+Runner settings and deployment steps live in [workflow setup](behavioral-ci.md).
+
 ---
 
 ## 1. Goal and definition of done
@@ -246,10 +249,13 @@ PK can be enabled through `MIDBRAIN_HARNESS_PK`, but there is no separate scored
 - **Recorded validation:** see [2026-09-08 validation](validation-2026-09-08.md). The original
   required run finished 93 PASS / 27 FAIL / 1 BLOCKED. The later four-client run was
   32 PASS / 1 FAIL; a separate OpenCode rerun passed after its fix. A subsequent required
-  run stopped on provider billing. Those reports are retained without rewriting outcomes.
+  run stopped on provider billing. The completed broad run `20260909-083452-4fdd` tested
+  `6d6fc58` and finished 108 PASS / 16 FAIL / 1 BLOCKED, with clean isolation and
+  `required: false`. It predates the native Codex approval driver. Reports are retained
+  without rewriting outcomes; this checkpoint does not validate the current candidate.
 - **Pending proof:** a complete passing required matrix for the chosen candidate and model
-  pins, plus Radu's release review. A parallel 2026-09-09 run is not a sign-off artifact until
-  it completes and its result is checked; this document does not infer its outcome.
+  pins, plus Radu's release review. Passing local programmatic checks and the focused native
+  approval check do not establish that full behavioral result.
 - **Outside current proof:** Linux NanoClaw behavioral validation, broader supported OS/client
   combinations, CI/release enforcement, automatic update discovery, real-npm post-publish
   smoke, and the scope limits in the table above. No uninstall exists to test.
@@ -432,8 +438,10 @@ smoke mode are not implemented.
    configuration; cheaper-model failures remain recorded and need triage.
 3. Run the full required gate and obtain Radu's review of all four product changes below.
    Evidence export is ready; it cannot manufacture a passing run.
-4. Provision and validate a dedicated runner for the built workflow after agreeing how to
-   handle native approval. Broader OS coverage and post-publish upgrade smoke remain separate work.
+4. Validate Linux execution, including the implemented native approval driver. The workflow
+   currently targets a self-hosted runner; a GitHub-hosted Ubuntu trial is proposed in the
+   [deployment sequence](behavioral-ci.md#deployment-sequence-proposed). It has not been
+   implemented or dispatched. Broader OS coverage and post-publish upgrade smoke remain separate work.
 
 
 ## NanoClaw implementation boundary
