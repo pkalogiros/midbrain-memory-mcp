@@ -168,24 +168,37 @@ native and synchronous; there is no fallback hook replay.
 
 For the complete required matrix, use `run --mode registry --upgrade --required`.
 This rejects client/scenario subsets; FAIL, BLOCKED, and SKIP all exit nonzero.
-Add `--approve-codex-hooks` on Linux/macOS to automate native Codex hook approval
-(Python 3 and Codex 0.150.1 required), or `--interactive` for manual terminal approval. The harness first verifies capture is absent, opens Codex for `/hooks`
-approval, then verifies capture in a new process without the trust bypass. Approve
-only the three installed MidBrain hooks and exit with `/quit`. Without either flag,
-the approval cell remains BLOCKED. Claude cold-first-turn coverage creates a
+Native Codex hook approval runs automatically on Linux/macOS when its S10 case is selected
+(Python 3 and Codex 0.150.1 required). Use `--interactive` for manual terminal approval
+instead. The harness first verifies capture is absent, opens Codex for `/hooks` approval,
+then verifies capture in a new process without the trust bypass. In manual mode, approve
+only the three installed MidBrain hooks and exit with `/quit`. The old
+`--approve-codex-hooks` flag is accepted for compatibility but is no longer needed.
+Claude cold-first-turn coverage creates a
 separate fresh home when the main home has already run an upgrade prelude.
 
 For a smaller run that retains the other scenarios, add `--simple`:
 
 ```bash
-node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
+node harness/run.mjs run --mode registry --upgrade --simple
 ```
 
 Cross-client recall follows one cycle in manifest order:
 OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode. Every client writes once
-and reads once. This uses five pairs / ten prompts instead of twenty pairs / forty
-prompts. All other selected scenarios and their pass/fail checks are unchanged;
+and reads once. This uses five pairs / ten prompts instead of twenty pairs / twenty-five
+prompts. In every mode a writer stores one checkpoint that all of its readers read, so the
+full matrix costs five writes plus twenty reads, not forty prompts, and the indexing grace is
+paid once per writer. All other selected scenarios and their pass/fail checks are unchanged;
 the savings apply to cross-client recall, not the entire bill.
+
+Four more turns are scored from existing evidence rather than repeated, and each cell says
+so in its notes: in upgrade mode S1 scores the prelude's post-upgrade capture (the first
+candidate session, same prompt and project); Claude's hook-ordering case is derived from S1's
+native read-back timestamps; S4 reuses S1's global-credential write from proj-a as its global
+marker (the leak check spans the S1 write); and in simple mode only, S3 is scored on the
+prelude's checkpoint write and fresh-session recall on the candidate instead of two more
+prompts. Required mode keeps S3 explicit. A full upgrade matrix is 106 prompts (was 132), a
+simple one 81 (was 102).
 
 Client subsets form a cycle in the same stable order; at least two clients are needed
 for cross-client recall. Unavailable clients keep their place and affected links are
@@ -235,5 +248,5 @@ distinguishes current checks from unvalidated or missing coverage. Follow the
 A manual [behavioral workflow](../.github/workflows/behavioral.yml) is implemented with
 smoke/simple/required suites, pinned models/clients, selected artifacts and scoped cleanup.
 It has not been deployed or run in the cloud. See [runner and secret setup](../docs/testing/behavioral-ci.md).
-The required suite uses `--approve-codex-hooks` and retains the before/after capture proof.
+The required suite automates native Codex hook approval and retains the before/after capture proof.
 Native approval automation is implemented; a full unattended Linux run still needs validation.

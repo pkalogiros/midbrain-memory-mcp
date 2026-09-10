@@ -22,6 +22,9 @@ import {
   activateNanoClawStateDir,
 } from "../shared/state-dir.mjs";
 
+import { stableShimPath } from "../shared/clients/shim.mjs";
+import { globalKeystorePath } from "../shared/keystore.mjs";
+
 const HOME = os.homedir();
 
 afterEach(() => {
@@ -29,6 +32,22 @@ afterEach(() => {
 });
 
 describe("state-dir defaults (MIDBRAIN_STATE_DIR unset)", () => {
+  it.each(["claude", "codex", "hermes"])(
+    "%s stable shim path is unchanged (~/.midbrain/bin/<client>-hook[.cmd])",
+    (client) => {
+      const suffix = process.platform === "win32" && client !== "codex" ? ".cmd" : "";
+      expect(stableShimPath(client)).toBe(
+        path.join(HOME, ".midbrain", "bin", `${client}-hook${suffix}`),
+      );
+    },
+  );
+
+  it("global keystore path is unchanged", () => {
+    expect(globalKeystorePath()).toBe(
+      path.join(HOME, ".config", "midbrain", ".midbrain-keystore.json"),
+    );
+  });
+
   it("activates the mounted NanoClaw root only when no explicit root exists", () => {
     expect(activateNanoClawStateDir()).toBe(nanoClawStateDir());
     expect(process.env.MIDBRAIN_STATE_DIR).toBe(path.join(HOME, ".claude", ".midbrain"));
@@ -85,5 +104,32 @@ describe("state-dir override (MIDBRAIN_STATE_DIR set)", () => {
   it("the shim bin path still contains the .midbrain/bin tail for ownership matching", () => {
     process.env.MIDBRAIN_STATE_DIR = BASE;
     expect(shimBinDir().replace(/\\/g, "/")).toContain(".midbrain/bin");
+  });
+});
+
+describe("install output never injects MIDBRAIN_STATE_DIR", () => {
+  it("MIDBRAIN_STATE_DIR is not a reserved/rebuilt env key and is not emitted by adapters", async () => {
+    // The installer/adapters must not write MIDBRAIN_STATE_DIR into any client
+    // MCP config; only the NanoClaw skill sets it (in the group MCP env). Guard
+    // against a regression that would relocate a normal host install's state.
+    const { RESERVED_ENV_KEYS } = await import("../shared/clients/utils.mjs");
+    // It is intentionally NOT in RESERVED_ENV_KEYS (that set is about stripping
+    // host-detection hints); the real guarantee is that no adapter emits it.
+    // Scan adapter sources for an assignment.
+    const fs = await import("fs/promises");
+    const adapters = [
+      "shared/clients/claude.mjs",
+      "shared/clients/codex.mjs",
+      "shared/clients/hermes.mjs",
+      "shared/clients/opencode.mjs",
+      "shared/clients/generic.mjs",
+    ];
+    for (const file of adapters) {
+      const src = await fs.readFile(new URL(`../${file}`, import.meta.url), "utf8");
+      expect(src, `${file} must not write MIDBRAIN_STATE_DIR`).not.toMatch(
+        /MIDBRAIN_STATE_DIR\s*[:=]/,
+      );
+    }
+    expect(RESERVED_ENV_KEYS.has("MIDBRAIN_STATE_DIR")).toBe(false);
   });
 });

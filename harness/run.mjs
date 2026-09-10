@@ -164,7 +164,6 @@ async function run(flags) {
       required: Boolean(flags.required),
       simple: Boolean(flags.simple),
       interactive: Boolean(flags.interactive),
-      approveCodexHooks: Boolean(flags['approve-codex-hooks']),
       upgrade,
     },
   });
@@ -402,11 +401,14 @@ commands
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
   run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR]
-           [--approve-codex-hooks | --interactive]
+           [--interactive]
   report   <runDir>                 re-render report.md from results.json
 
 --simple: cross-client recall uses one directed cycle; other scenarios are unchanged.
           Without --simple, all ordered pairs run. Cannot combine with --required.
+
+Native Codex hook approval is automatic for its S10 case (Python 3, Codex 0.150.1, Linux/macOS).
+Use --interactive for manual terminal approval instead. --approve-codex-hooks is accepted for compatibility but no longer needed.
 
 clients:   ${ORDER.join(', ')}
 scenarios: ${SCENARIOS.map((s) => s.id).join(', ')}

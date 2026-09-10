@@ -50,7 +50,7 @@ flowchart TB
         Evidence["Prompts, turns, API readback, logs"] --> Score["Deterministic checks"]
         Score --> Report["results.json and report.md"]
     end
-    Clients <--> Models["Model provider APIs"]
+    Clients <--> Models["Configured model providers<br/>Direct Anthropic / OpenAI APIs<br/>Bedrock and OpenRouter integration not implemented."]
     Nano <--> Models
     Product <-->|"Capture and recall"| API["Dedicated MidBrain test API"]
     API -->|"Read-only verification"| Evidence
@@ -143,11 +143,34 @@ the same checks; it does not promise identical answers, tokens or latency on eve
    PASS means every check passed. BLOCKED means a prerequisite was missing (binary, secret,
    Docker, approval support, provider billing error). Failed cells are not automatically
    rerun until green. Polling retries transient reads, and NanoClaw may natively retry
-   response formatting; every native reply must still be captured exactly once.
+   response formatting; every native reply must still be captured exactly once. See [failure handling](#missing-prerequisites-and-failure-handling) for client setup, aborts and partial results.
 8. **Tripwire and report.** Hash enumerated host config surfaces before and after; detected drift
    fails the run. Render `report.md` and `results.json`. Exit 0 only when every cell is PASS
    and isolation is clean. `--required` additionally requires registry+upgrade mode and the
    full client/scenario selection. A focused green run is only a checkpoint.
+
+## Missing prerequisites and failure handling
+
+The harness launches selected clients and handles known failure cases with explicit checks. It does not autonomously troubleshoot the machine or install every missing prerequisite. A failure can affect one client, one scenario, or the whole run.
+
+| Situation | What the harness does |
+|---|---|
+| OpenCode or Hermes is not installed | Installs a run-local copy using npm or uv, respectively. Those package managers must already be available; the harness does not install them. |
+| Claude Code or Codex is missing; a client prerequisite or provider credential is missing | Marks that client BLOCKED with the reason and continues with runnable clients. This also applies when a run-local client install or preflight fails. Cross-client coverage affected by unavailable clients is recorded as BLOCKED. |
+| Docker is unavailable for NanoClaw | Marks NanoClaw BLOCKED and continues with the other runnable clients. With prerequisites available, the default preparation path clones the pinned runner and builds its image; a configured prepared image must already be present. |
+| Client setup fails after the product installer | Records a failed Clean install check for that client and blocks its later scenarios. Other runnable clients continue. |
+| A scenario cannot run or throws an error | Catches the error at the scenario boundary, records BLOCKED for an explicit dependency error or FAIL for an unexpected harness error, then continues the remaining scenarios. |
+| A command takes too long or memory readback is delayed | Client commands have timeouts. Readback polls within a bounded window and can tolerate transient read errors; exhausted waits are evaluated by the scenario checks. Failed cells are not automatically rerun until green. |
+| The shared MidBrain key is missing, the initial API probe fails, or run options are invalid | Stops the whole run with an error and nonzero exit. There is no automatic cloud-to-local fallback. Local hosting requires separately starting the backend and seeding its keys before running the harness. |
+| An error escapes the per-client or per-scenario handlers | Can abort the run before results.json and report.md are produced. Candidate packaging, registry startup, filesystem operations, or final verification can fail outside those handlers; a complete report is not guaranteed. |
+
+Run `node harness/run.mjs doctor` before a costly run to inspect prerequisites. Doctor is a separate command, not an automatic repair step. Its READY summary means at least one client is runnable and shared checks passed; inspect every client row for BLOCKED entries.
+
+The harness writes `results.partial.json` after each completed scenario across its selected clients or pairs. After an interruption, that checkpoint may omit the scenario that was in progress; an early setup failure may leave no checkpoint. Preserve the existing evidence for diagnosis, fix the reported cause, and start a new run. Partial results are not a completed run or release evidence.
+
+Run cleanup is attempted on normal completion, errors inside the run cleanup scope, and handled SIGINT/SIGTERM. It stops the loopback registry and removes owned NanoClaw containers; the private run directory remains for inspection. SIGKILL or host failure can prevent cleanup, and the separately started local backend stays running until explicitly stopped.
+
+Continuing after a failure does not make the run successful: FAIL, BLOCKED, SKIP, an empty run, or detected real-home drift produce a nonzero exit. Product self-repair exercised by the scenarios is separate from the harness handling its own infrastructure failures.
 
 ## What each file does
 
@@ -217,7 +240,7 @@ client-specific behavior can require additional cases; those are declared by the
 | File | Driver mechanism |
 |---|---|
 | `claude.mjs` | `claude -p --output-format stream-json`, `--session-id` / `--resume`, parses tool_use and tool_result blocks, copies transcripts. |
-| `codex.mjs` | `codex exec --json`, ChatGPT-login reuse or `codex login --with-api-key`, hook-trust bypass for ordinary turns; the persisted-trust case uses `--approve-codex-hooks` for native UI automation or `--interactive` for manual approval. |
+| `codex.mjs` | `codex exec --json`, ChatGPT-login reuse or `codex login --with-api-key`, hook-trust bypass for ordinary turns; the persisted-trust case automates native UI approval by default; use `--interactive` for manual approval. |
 | `opencode.mjs` | Installed run-locally with npm, driven with `opencode run`, native stream parsed, truncated tool output recovered from its output files. |
 | `hermes.mjs` | Installed run-locally with `uv tool install hermes-agent[mcp]`, `hermes chat -q`, evidence from its session export, hook consent toggle. |
 | `nanoclaw.mjs` | Thin manifest over `lib/nanoclaw.mjs`; owns the NanoClaw lifecycle cases. |
@@ -229,9 +252,9 @@ client-specific behavior can require additional cases; those are declared by the
 | `_shared.mjs` | `runTurn` (persists prompt, turn, asserts frozen inputs), `readback` (poll by marker), metadata and turn checks, cell constructor. |
 | `index.mjs` | Execution order. |
 | `s01-capture.mjs` | User and assistant rows reach the API with matching client/session/cwd metadata and marker text. Exactly one user capture and one capture per native assistant reply. |
-| `s02-cross-client-recall.mjs` | Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. All ordered pairs by default; `--simple` selects one directed cycle. |
-| `s03-fresh-session-continuity.mjs` | A checkpoint written in one session is recovered in a new session of the same client. |
-| `s04-project-global-isolation.mjs` | Project-scoped key isolates from global; global fallback works from an unscoped directory. |
+| `s02-cross-client-recall.mjs` | Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. Each writer stores one checkpoint that every reader reads (five writes, twenty reads). All ordered pairs by default; `--simple` selects one directed cycle. |
+| `s03-fresh-session-continuity.mjs` | A checkpoint written in one session is recovered in a new session of the same client. In simple mode with the upgrade prelude, scored on the prelude's own write and fresh-session recall. |
+| `s04-project-global-isolation.mjs` | Project-scoped key isolates from global; global fallback works from an unscoped directory. The global marker is S1's capture (same project and credential), so only the project write is new. |
 | `s05-freshness-reconciliation.mjs` | After an update, a new session names the current value as current, as JSON, citing memory evidence. Conflicting live repository/file state is not tested. |
 | `s06-no-match-clean.mjs` | An unrelated question gets a clean answer with no memory process language; it does not force an unsuccessful memory lookup. |
 | `s08-marker-robustness.mjs` | Marker-like literal text survives the round trip unchanged. |
@@ -316,7 +339,7 @@ To inspect **what was actually sent**, open the private run's
 `evidence/<client>/<scenario>/<label>.prompt.json`. The shared
 [runTurn helper](../../harness/scenarios/_shared.mjs) writes this before launching the client.
 For example, OpenCode writing for Claude in S2 produces
-`evidence/opencode/s02-cross-client-recall/write-for-claude.prompt.json`.
+`evidence/opencode/s02-cross-client-recall/write.prompt.json` (one shared write per writer).
 The file includes `prompt`, `project` and session/resume options. A saved prompt alone does
 not prove execution completed; check its normalized turn and result cells too.
 
@@ -536,8 +559,8 @@ The historical Codex runs used a ChatGPT login; the workflow uses separately bil
 | Programmatic | Build, lint, tests, isolation; no models | Varies by machine; recent local checks under 2 min | $0 model usage | Not a behavioral matrix; runner compute still has a cost. |
 | Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | About 2 min | Under $0.15 | `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
 | Focused | One/two clients and selected scenarios | Depends on selection; one retained run took about 6 min | Varies | `20260908-090053-5472`; a targeted run is not comparable to full coverage. |
-| Simple | Five clients, all scenarios, upgrades, five S2 links | Not yet measured in a completed run recorded here | Not yet measured | Saves 30 S2 prompts; no measured simple/full token-cost ratio. |
-| Full matrix | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
+| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links | Not yet measured in a completed run recorded here | Not yet measured | Recommended for everyday behavioral checks. Saves 30 S2 prompts; no measured simple/full token-cost ratio. |
+| **Full matrix** | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | Broader cross-client confidence. `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
 | Required attempt | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
 
 Fixed indexing/readback waits, container startup, tool output, model latency, context and
@@ -574,16 +597,28 @@ triaged; they are not automatically waived as model noise.
 
 ## Choose and run a suite
 
-Start with a programmatic check, then smoke, then simple for broader iteration. Run required
-when collecting complete release evidence. The model-backed commands below incur provider
-usage; `npm run check` does not run a paid behavioral matrix.
+“Default” marks the recommended everyday choice in this guide; it does not change CLI or
+GitHub workflow defaults. Select Simple explicitly with `--simple` or `suite=simple`.
+
+The two main behavioral choices are **Simple** for everyday iteration and **Full matrix**
+for exhaustive cross-client coverage. Simple keeps all implemented scenarios and upgrades,
+but checks five S2 links instead of twenty; it can miss failures specific to the omitted
+client pairs. Full matrix checks every ordered pair. For release evidence, run that full
+matrix with `--required`, which enforces complete selection and registry+upgrade mode.
+Required is a stricter use of the full matrix, not a larger suite or a premium model tier.
+
+Keep programmatic checks as the no-model prerequisite. Smoke is useful for a first setup
+check; focused runs help diagnose a failure. Neither needs to precede every Simple run.
+The model-backed commands below incur provider usage; `npm run check` does not run a paid
+behavioral matrix. These are coverage choices, not statistical confidence guarantees.
 
 | Run | Purpose | Can establish the full required gate? |
 |---|---|---|
 | Programmatic | Build, lint, tests, docs and isolation gates | Separate prerequisite |
 | Smoke | S1 capture and S6 clean unrelated answers in all five clients | No |
-| Simple | All scenarios and upgrades, with one cross-client cycle | No |
-| Required | All scenarios, upgrades and every ordered cross-client pair | Yes, if complete, all checks pass and evidence verifies |
+| **Simple (Default)** | Everyday behavioral checks: all scenarios and upgrades, with one cross-client cycle | No |
+| **Full matrix** | Broader validation: all scenarios, upgrades and every ordered cross-client pair | Only when run as Required below |
+| Required | Full matrix with enforced release-coverage requirements | Yes, if complete, all checks pass and evidence verifies |
 | Focused | Selected clients/scenarios while diagnosing a failure | No |
 
 “Light” means **simple** in this guide; there is no `--light` flag. Smoke is smaller again.
@@ -591,7 +626,8 @@ usage; `npm run check` does not run a paid behavioral matrix.
 release evidence. Omitting `--simple` alone does not mark the run as required.
 
 Run each command as a separate operation; these are alternatives, not a script that must
-execute all paid suites in sequence.
+execute all paid suites in sequence. Run from the repository root after completing
+[local setup](#local-setup), pinning models and checking readiness.
 
 ```bash
 # Programmatic checks
@@ -605,12 +641,17 @@ node harness/run.mjs run --mode registry --scenarios s01,s06
 
 ```bash
 # Simple: all scenarios, reduced cross-client pairing
-node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
+node harness/run.mjs run --mode registry --upgrade --simple
+```
+
+```bash
+# Full matrix: all scenarios and ordered pairs, without the required-gate designation
+node harness/run.mjs run --mode registry --upgrade
 ```
 
 ```bash
 # Required: full selection, including upgrades and native Codex approval
-node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
+node harness/run.mjs run --mode registry --upgrade --required
 ```
 
 ```bash
@@ -638,23 +679,66 @@ flowchart LR
 ```
 
 With five clients, simple runs five writer/reader pairs and ten S2 prompts. Full mode runs
-twenty ordered pairs and forty S2 prompts. The thirty-prompt saving applies to S2, not the
-whole run or bill. Subsets form a cycle in the same manifest order; S2 needs at least two
+twenty ordered pairs with five shared writes and twenty reads, twenty-five S2 prompts. The
+fifteen-prompt saving applies to S2, not the whole run or bill. In upgrade mode S1 also
+scores the prelude's post-upgrade capture instead of repeating it, Claude's hook-ordering case
+is derived from S1, S4 reuses S1's global write, and in simple mode S3 is scored on the
+prelude's write-then-fresh-recall pair. A full upgrade matrix is 106 prompts rather than 132;
+a simple run is 81 rather than 102. Every reused cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
 clients. Unavailable clients keep their place in a simple cycle, and affected links are
 BLOCKED. The planned links are recorded in `run.crossClientPairs`.
 
-`--approve-codex-hooks` requires Python 3 and Codex 0.150.1 on Linux/macOS. It validates the
+Native Codex hook approval runs automatically when its S10 case is selected. It requires
+Python 3 and Codex 0.150.1 on Linux/macOS. It validates the
 three installed MidBrain hooks, drives the native approval UI, and verifies unchanged hook
 hashes and persisted trust in a fresh process. S10 checks no capture before approval and
 capture afterward without bypass. Ordinary turns use the adapter's headless approval/trust
 bypasses; those do not establish persisted trust. Use `--interactive` for manual terminal
-approval instead. Without either option, that S10 case remains blocked.
+approval instead. The old `--approve-codex-hooks` flag is accepted for compatibility but
+is no longer needed. Missing prerequisites or failed approval still prevent this case from passing.
 
 Default capture readback waits up to 90 seconds, polling every 5 seconds and checking a
 5-second stable capture window; indexing grace is 20 seconds where used. Client turns default
 to a 300-second timeout. These are waiting bounds, not automatic reruns of failed scenarios.
 Tune through the documented env template/CLI flags only when investigating measured delays.
 Record the changed configuration and keep the original failed run.
+
+### Configure a run without a new suite format
+
+Use the existing flags and model environment variables. A selected set of built-in scenarios
+already serves as a custom suite; a separate JSON/YAML suite loader would add another format
+to maintain without adding coverage. Save a frequently used command in a small shell script
+if needed. New prompts or assertions belong in the versioned scenario drivers described in
+[prompt locations](#where-to-find-and-edit-the-prompts).
+
+| Setting | Local CLI | Current GitHub workflow |
+|---|---|---|
+| Suite / coverage | Combine `--clients`, `--scenarios`, `--simple`, and `--upgrade`; `--required` forbids filters and simple mode | `suite`: `smoke`, `simple`, or `required`; choose `required` for the full matrix |
+| Models | Set `MIDBRAIN_HARNESS_<CLIENT>_MODEL` independently for `CLAUDE`, `OPENCODE`, `HERMES`, `NANOCLAW`, and `CODEX` | `anthropic_model`: `claude-haiku-4-5` or `claude-sonnet-5` for all four Anthropic clients; Codex is pinned to `gpt-5.6-sol` |
+| OS | Runs on the actual host; there is no `--os` flag or OS emulation | Behavioral runner is fixed to self-hosted Linux; programmatic CI already tests Linux, macOS and Windows |
+| Custom test suite file | No `--suite-file` or arbitrary scenario-file loader; select existing scenario IDs | No custom client/scenario inputs |
+
+To test another OS, execute the harness on that OS with its prerequisites. NanoClaw still
+runs in a Linux Docker container. Local recipes target macOS/Linux; Windows behavioral
+support and the Linux workflow have not been established by the recorded validation.
+Changing a runner label alone does not validate a new platform. Keep the existing
+programmatic OS matrix and one behavioral host for now; expand behavioral platforms when
+there is a concrete platform-specific failure or support requirement.
+
+```bash
+# Custom selection: capture, cross-client recall and answer cleanliness in two clients
+# Inline model overrides apply to this command and take precedence over harness/.env.
+MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5 \
+MIDBRAIN_HARNESS_CODEX_MODEL=gpt-5.6-sol \
+node harness/run.mjs run --mode registry --clients claude,codex --scenarios s01,s02,s06
+```
+
+Use the [model setup recipe](#3-pin-models-and-check-readiness) to pin all five clients before
+a Simple or Full matrix run. OpenCode needs the provider prefix, for example
+`anthropic/claude-haiku-4-5`; Hermes also has `MIDBRAIN_HARNESS_HERMES_PROVIDER`.
+Model choices change the configuration being validated. Check `run.models` in the resulting
+`results.json`; a pass with one model does not establish a pass with another. There is no
+`--model` flag that changes every client at once.
 
 ## Commands and arguments
 
@@ -678,8 +762,8 @@ disable it, rather than writing `--simple=false`).
 | `--upgrade` | Off | Previous-release upgrade prelude; requires registry mode. |
 | `--simple` | Off | One directed S2 cycle; other selected checks unchanged. Incompatible with `--required`. |
 | `--required` | Off | Full client/scenario selection and all ordered pairs; requires registry+upgrade, forbids filters and simple mode. |
-| `--approve-codex-hooks` | Off | Native Codex approval automation for S10; pinned client and Python 3 required. |
-| `--interactive` | Off | Manual terminal alternative for S10 approval. Choose one approval mode. |
+| `--approve-codex-hooks` | Automatic | Compatibility flag; native approval already runs for the Codex S10 case. Pinned client and Python 3 required. |
+| `--interactive` | Off | Replace automatic native S10 approval with manual terminal approval; requires a TTY. |
 | `--root /absolute/path` | `MIDBRAIN_HARNESS_ROOT`, otherwise `~/.midbrain-harness` | Parent of `runs/<run-id>`; must be outside temporary directories. |
 | `--readback-timeout-ms 90000` | Env override, otherwise `90000` | Maximum capture readback wait; env: `MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS`. |
 | `--index-grace-ms 20000` | Env override, otherwise `20000` | Indexing delay before recall where used; env: `MIDBRAIN_HARNESS_INDEX_GRACE_MS`. |
@@ -876,6 +960,138 @@ uploads an artifact and cleans up. It serializes runs across branches to avoid o
 use of the dedicated backend identities. Execution has a 195-minute timeout inside a
 240-minute job budget. Provisioning the runner/backend and activating this button remain
 deployment work; see the linked setup guide.
+
+### What is still needed for deployment
+
+The workflow supplies job orchestration, client installation, test execution and evidence
+handling. **It does not provision a runner, a backend or test identities.** GitHub Actions
+can orchestrate either a GitHub-hosted VM or an AWS EC2 VM; AWS does not require a second
+test pipeline.
+
+| Deployment route | Where the clients run | What needs to be added |
+|---|---|---|
+| GitHub-hosted | A GitHub-provided Ubuntu VM for each job | Change `runs-on`, install missing prerequisites and validate capacity/network access. This route is not implemented yet. |
+| AWS with GitHub Actions | A dedicated EC2 Linux VM registered as a self-hosted runner | Provision and register the VM, configure its network and own its lifecycle. The current runner labels already fit this route. |
+
+Both routes need a healthy test backend, credentials, Linux validation and an initial smoke
+run. Neither currently has a validated cloud execution. Slack is optional and is not a
+prerequisite for running tests; the Actions job status and evidence artifact already provide
+the result.
+
+### GitHub deployment steps
+
+1. **Prepare the test backend.** Use an existing staging MidBrain deployment or provision
+   one separately. Create two distinct test agents for global and project memory. Confirm
+   storage, retrieval and indexing work, not only `/health`. The runner and NanoClaw must
+   reach that same API; a developer laptop's `localhost` URL is not a cloud endpoint.
+2. **Configure the repository.** Enable Actions and allow the actions used by the workflow.
+   Create the `behavioral-testing` environment with the settings below. Limit eligible refs
+   and configure available environment protections so only reviewed code receives test keys.
+
+| Environment setting | Value to supply |
+|---|---|
+| Variable `MIDBRAIN_HARNESS_API_URL` | Reachable, non-production API URL without embedded credentials |
+| Secret `MIDBRAIN_HARNESS_API_KEY` | Global test agent key |
+| Secret `MIDBRAIN_HARNESS_PROJECT_API_KEY` | Different project test agent key |
+| Secret `ANTHROPIC_API_KEY` | Funded key with access to the chosen Anthropic model |
+| Secret `OPENAI_API_KEY` | Funded key with access to the workflow's Codex model |
+
+3. **Choose the machine.** To use GitHub-hosted compute, change the job's `runs-on` to
+   `ubuntu-24.04`. Add an explicit, versioned `uv` installation before prerequisite checks;
+   verify Git, Bash, tar, Python 3 and a working Docker daemon under the job account.
+   Node and the client installs are already handled by the workflow/adapters. Measure free
+   disk, peak memory and image-build time during smoke before choosing a larger runner.
+   The standard runner's capacity depends on repository visibility; this harness has no
+   measured cloud minimum yet. See [GitHub's runner specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+   Alternatively, keep the current labels and register a dedicated Linux runner, using the
+   AWS steps below or another machine.
+4. **Validate Linux before paid coverage.** Run the optional native Codex approval check
+   described in the linked workflow setup guide, inspect every client row in `doctor`,
+   and verify Docker networking to the API and loopback npm registry. On Linux, the current
+   NanoClaw adapter defaults to host networking. Ensure the chosen runner can reach a private
+   backend; a GitHub-hosted VM does not automatically inherit access to an AWS VPC.
+5. **Activate the workflow through review.** Merge the reviewed workflow and harness to the
+   default branch. Then select a trusted candidate branch under Actions → Behavioral tests.
+   Manual dispatch requires the workflow on the default branch; the operator needs write
+   access. See [GitHub's manual-run instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+6. **Roll out in stages.** Run `smoke` first and inspect the result, redacted artifact and
+   cleanup. Use `simple` for everyday checks, then `required` on the clean release candidate.
+   A successful deployment means the job executes and reports correctly, including failures;
+   release approval additionally needs a verified passing required matrix.
+
+### AWS deployment steps using the same GitHub workflow
+
+The simplest AWS route for this implementation is **GitHub Actions → EC2 runner → existing
+test API**, with NanoClaw using Docker on that EC2 host. The Actions button, secrets, suite
+selection and evidence upload stay the same.
+
+1. **Provision a dedicated VM.** Use an Ubuntu 24.04 x86-64 EC2 instance. As an initial
+   sizing assumption, allow 4 vCPUs, 16 GiB RAM and 60 GiB of encrypted disk; these are trial
+   allocations, not measured requirements. Keep the runner home outside `/tmp`. Avoid
+   interruption-prone capacity for the first required run and budget for the full four-hour
+   job window. VM, disk/network and provider-token charges are separate costs.
+2. **Connect it to the backend and package services.** Prefer the backend's VPC where
+   practical; allow the test API port from the runner's security group. Provide outbound
+   access to GitHub, npm, PyPI, image registries and model providers, through the appropriate
+   internet route or NAT. GitHub's runner initiates its connection outward; the Actions
+   service does not require an inbound listener on the VM. See the
+   [self-hosted runner network requirements](https://docs.github.com/en/actions/reference/runners/self-hosted-runners).
+   For administration, Session Manager can avoid inbound SSH when its agent, instance
+   permissions and service connectivity are configured. See
+   [AWS Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html).
+3. **Install the runner prerequisites.** Install Git, Bash, tar, Python 3, a pinned `uv`
+   and Docker. Use a dedicated runner user and verify it can run `docker info` without
+   interactive sudo; a service must receive that user's updated group membership. No
+   personal client logins or MidBrain credentials should be baked into the VM image.
+4. **Register and start the GitHub runner.** In repository Settings → Actions → Runners →
+   New self-hosted runner, select Linux/x64 and follow the generated download/configuration
+   commands. Add the custom label `midbrain-behavioral`; confirm `self-hosted` and `linux`
+   are also present. Run it as a service and confirm it is online before dispatch. Use
+   GitHub's generated registration token during setup, not a token committed to the repo.
+   See [runner registration](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners).
+5. **Use the GitHub configuration and rollout above.** Keep the existing `runs-on` labels.
+   The four test secrets still come from the GitHub environment; no AWS access keys are
+   needed by the current test workflow. An instance role for Session Manager is separate.
+   Start with Linux prerequisite checks and smoke, inspect artifacts and then run required
+   coverage when ready.
+6. **Own shutdown and retention.** The workflow cleans its private attempt directory and
+   labelled containers; it does not stop or terminate EC2. Assign an operator to stop the
+   runner between uses or dispose of the VM after a job, and start it before the next
+   dispatch. A stopped VM cannot pick up an Actions job. Automatic VM startup, registration
+   and disposal would be additional infrastructure work; an ephemeral runner registration
+   alone does not terminate the instance. Preserve the exact tested archive privately
+   before current cleanup if later release verification needs it. Evidence remains in
+   GitHub artifacts for 14 days unless a separate retention process is added.
+
+An AWS-only button without GitHub would need a separate launcher, secret injection, result
+storage and cleanup integration. None is implemented. Reusing Actions with an EC2 runner
+avoids duplicating those parts while leaving the harness and pass/fail rules unchanged.
+
+
+### Trigger from the GitHub CLI
+
+After that deployment and runner setup, these are alternatives to the Actions button.
+Run from an authenticated checkout and replace `YOUR_BRANCH` with the branch to test.
+The workflow must already exist on the default branch, and the selected branch must contain
+the workflow. Dispatch queues a paid run; it does not provision a runner or backend.
+
+```bash
+# Everyday behavioral validation
+gh workflow run behavioral.yml --ref YOUR_BRANCH \
+  -f suite=simple -f anthropic_model=claude-haiku-4-5
+```
+
+```bash
+# Full matrix with required evidence verification
+gh workflow run behavioral.yml --ref YOUR_BRANCH \
+  -f suite=required -f anthropic_model=claude-haiku-4-5
+```
+
+For an initial smoke check, use `-f suite=smoke`; to select the other configured Anthropic
+model, use `-f anthropic_model=claude-sonnet-5`. The workflow has no `full`, `focused`, OS,
+or Codex-model dispatch input. For a custom selection, use the local CLI recipe above.
+Programmatic CI runs automatically on pushes and pull requests and has no manual dispatch
+input; use `npm run check` to trigger those checks locally.
 
 **Shareable evidence:** the workflow uploads only `summary.md` and the exported, redacted
 `bundle/`, retained for 14 days. Raw `results.json`, streams, logs, databases and run homes

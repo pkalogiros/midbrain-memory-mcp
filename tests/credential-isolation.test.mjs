@@ -1,9 +1,9 @@
 /**
  * Mock-independent credential isolation regression (PRD-035 S4).
  *
- * These tests exercise the real filesystem writers. Credential bytes are
- * never read or logged; assertions cover placement, permissions, and hash-only
- * equality across the real-home credential surfaces.
+ * These tests exercise real filesystem writers with dummy credentials, covering
+ * placement, permissions, and promotion. Real-home credentials are compared
+ * only through hashes.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -47,39 +47,27 @@ async function expectIsolatedWrite({ clients = [], target, write }) {
 }
 
 describe("credential writers stay inside the test sandbox without filesystem interception", () => {
-  it("isolates the OpenCode adapter writer", async () => {
-    await expectIsolatedWrite({
-      target: (env) => path.join(env.home, ".config", "opencode", ".midbrain-key"),
-      write: () => new OpenCode().writeKey(DUMMY_CREDENTIAL),
-    });
-  });
-
-  it("isolates the Claude adapter writer", async () => {
-    await expectIsolatedWrite({
-      target: (env) => path.join(env.home, ".config", "claude", ".midbrain-key"),
-      write: () => new Claude().writeKey(DUMMY_CREDENTIAL),
-    });
-  });
-
-  it("isolates the Codex adapter writer", async () => {
-    await expectIsolatedWrite({
-      target: (env) => path.join(env.home, ".config", "codex", ".midbrain-key"),
-      write: () => new Codex().writeKey(DUMMY_CREDENTIAL),
-    });
-  });
-
-  it("isolates the Hermes adapter writer", async () => {
-    await expectIsolatedWrite({
-      target: (env) => path.join(env.home, ".config", "hermes", ".midbrain-key"),
-      write: () => new Hermes().writeKey(DUMMY_CREDENTIAL),
-    });
-  });
-
-  it("isolates the NanoClaw adapter writer", async () => {
-    await expectIsolatedWrite({
-      target: (env) => path.join(env.home, ".config", "nanoclaw", ".midbrain-key"),
-      write: () => new NanoClaw().writeKey(DUMMY_CREDENTIAL),
-    });
+  describe.each([false, true])("MIDBRAIN_STATE_DIR override: %s", (relocated) => {
+    it.each([
+      ["opencode", OpenCode], ["claude", Claude], ["codex", Codex],
+      ["hermes", Hermes], ["nanoclaw", NanoClaw],
+    ])(
+      "isolates the %s adapter writer in its native client directory",
+      async (id, Client) => {
+        const client = new Client();
+        await expectIsolatedWrite({
+          target: (env) => path.join(env.home, ".config", id, ".midbrain-key"),
+          write: async (env) => {
+            if (relocated) process.env.MIDBRAIN_STATE_DIR = path.join(env.home, "relocated-state");
+            await client.writeKey(DUMMY_CREDENTIAL);
+            expect(await client.resolveClientKey()).toEqual({
+              key: DUMMY_CREDENTIAL,
+              source: path.join(env.home, ".config", id, ".midbrain-key"),
+            });
+          },
+        });
+      },
+    );
   });
 
   it("isolates the installer global writer", async () => {
@@ -103,5 +91,81 @@ describe("credential writers stay inside the test sandbox without filesystem int
         DUMMY_CREDENTIAL,
       ),
     });
+  });
+});
+
+const NO_KEY_MESSAGE =
+  'No API key found. Run the installer interactively first or set MIDBRAIN_API_KEY.';
+
+async function writeCredentialFixture(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${value}\n`, { mode: 0o600 });
+}
+
+function muteInstallerOutput() {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+}
+
+describe('global credential promotion with the real filesystem', () => {
+  it('preserves a direct global file byte-for-byte with distinct client keys', async () => {
+    const env = await makeTestEnv({ clients: ['opencode', 'claude'] });
+    try {
+      muteInstallerOutput();
+      const opencodeKey = path.join(env.home, '.config', 'opencode', '.midbrain-key');
+      const claudeKey = path.join(env.home, '.config', 'claude', '.midbrain-key');
+      await writeCredentialFixture(opencodeKey, 'opencode-client-dummy');
+      await writeCredentialFixture(claudeKey, 'claude-client-dummy');
+      await writeCredentialFixture(env.paths.globalKey, 'global-preserve-dummy');
+      const before = await fs.readFile(env.paths.globalKey);
+      const beforeStat = await fs.stat(env.paths.globalKey);
+
+      await main({ nonInteractive: true, skipRules: true });
+
+      expect(await fs.readFile(env.paths.globalKey)).toEqual(before);
+      expect((await fs.stat(env.paths.globalKey)).mtimeMs).toBe(beforeStat.mtimeMs);
+    } finally {
+      await env.restore();
+    }
+  });
+
+  it('makes zero writes when non-interactive client credentials differ', async () => {
+    const env = await makeTestEnv({ clients: ['opencode', 'claude'] });
+    try {
+      muteInstallerOutput();
+      const opencodeKey = path.join(env.home, '.config', 'opencode', '.midbrain-key');
+      const claudeKey = path.join(env.home, '.config', 'claude', '.midbrain-key');
+      await writeCredentialFixture(opencodeKey, 'opencode-distinct-dummy');
+      await writeCredentialFixture(claudeKey, 'claude-distinct-dummy');
+      const beforeOpenCode = await fs.stat(opencodeKey);
+      const beforeClaude = await fs.stat(claudeKey);
+
+      await expect(main({ nonInteractive: true, skipRules: true }))
+        .rejects.toThrow(/Distinct eligible credentials/);
+
+      await expect(fs.access(env.paths.globalKey)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await fs.stat(opencodeKey)).mtimeMs).toBe(beforeOpenCode.mtimeMs);
+      expect((await fs.stat(claudeKey)).mtimeMs).toBe(beforeClaude.mtimeMs);
+    } finally {
+      await env.restore();
+    }
+  });
+
+  it('never promotes a project credential into the global file', async () => {
+    const env = await makeTestEnv({ clients: ['opencode'] });
+    try {
+      muteInstallerOutput();
+      const projectDir = path.join(env.root, 'project');
+      const projectKey = path.join(projectDir, '.midbrain', '.midbrain-key');
+      await writeCredentialFixture(projectKey, 'project-only-dummy');
+      process.env.MIDBRAIN_PROJECT_DIR = projectDir;
+
+      await expect(main({ nonInteractive: true, skipRules: true }))
+        .rejects.toThrow(NO_KEY_MESSAGE);
+      await expect(fs.access(env.paths.globalKey)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readFile(projectKey, 'utf8')).toBe('project-only-dummy\n');
+    } finally {
+      await env.restore();
+    }
   });
 });

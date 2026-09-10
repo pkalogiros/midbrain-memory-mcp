@@ -9,6 +9,23 @@ export default {
   parity: true,
   rows: ['Fresh-session continuity', 'Rule and priming compliance'],
   async run({ ctx, api, client, project }) {
+    // Simple mode: the upgrade prelude already wrote a checkpoint in one session and recalled it
+    // from a fresh session on the candidate, which is this scenario's claim. Score those turns.
+    const pre = ctx.options?.simple ? ctx.meta?.upgradeTurns?.[client.id] : null;
+    if (pre) {
+      const { marker: pm, value, write, recall } = pre;
+      const memCalls = recall.toolCalls.filter(isMidbrainTool);
+      const evidence = [relEvidence(ctx, write.rawPath), relEvidence(ctx, recall.rawPath), relEvidence(ctx, recall.jsonPath)];
+      const notes = `derived from the S9 upgrade prelude (simple mode): checkpoint written in session ${write.sessionId} on the previous release, recalled in fresh session ${recall.sessionId} on the candidate; midbrain calls=${memCalls.length}`;
+      return [
+        cell({ row: 'Fresh-session continuity', scenario: this.id, client, prompt: recall.prompt, expected: 'A brand-new session recovers the checkpoint through a MidBrain tool call containing the marker and returns its hidden value.', evidence, notes, checks: [
+          ...turnChecks(recall),
+          check('fresh session has a different session id', recall.sessionId && write.sessionId && recall.sessionId !== write.sessionId, `${write.sessionId} → ${recall.sessionId}`),
+          ...recallChecks(recall, pm, [value]),
+        ] }),
+        cell({ row: 'Rule and priming compliance', scenario: this.id, client, prompt: recall.prompt, expected: 'memory-first ordering, anchor preserved, search deepened on miss', evidence, notes: 'derived from the S9 upgrade prelude (simple mode)', checks: complianceChecks(recall, pm) }),
+      ];
+    }
     const m = ctx.subMarker(client.id, 'continuity');
     const h = randomBytes(2).toString('hex');
     const a = `alpha_${h}`;

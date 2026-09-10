@@ -18,6 +18,7 @@ violations=()
 exception_count=0
 
 while IFS= read -r -d '' test_file; do
+  [[ -f "$test_file" ]] || continue
   if ! grep -Eq "$WRITER_PATTERN" "$test_file"; then
     continue
   fi
@@ -121,6 +122,8 @@ trap 'rm -rf "$TEMP_ROOT"' EXIT
 mkdir -p "$COPY_ROOT"
 
 while IFS= read -r -d '' source_file; do
+  # git ls-files includes tracked files deleted in the working tree.
+  [[ -f "$source_file" || -L "$source_file" ]] || continue
   if [[ "$source_file" == "node_modules" || "$source_file" == node_modules/* ]]; then
     continue
   fi

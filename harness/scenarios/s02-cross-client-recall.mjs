@@ -9,25 +9,36 @@ export default {
   parity: true,
   rows: ['Cross-client recall', 'Rule and priming compliance'],
   async run({ ctx, api, writer, reader, project }) {
-    const m = ctx.subMarker(writer.id, `xrecall-${reader.id}`);
-    const value = 'VALUE-' + randomBytes(8).toString('hex');
-    const writePrompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it and acknowledge briefly.`;
+    // One checkpoint per writer, read by every reader: the directed pairs are
+    // unchanged, the duplicate writes (and their indexing grace) are not repeated.
+    ctx.meta = ctx.meta || {};
+    ctx.meta.s02Writes = ctx.meta.s02Writes || {};
+    let shared = ctx.meta.s02Writes[writer.id];
+    const fresh = !shared;
+    if (fresh) {
+      const m = ctx.subMarker(writer.id, 'xrecall');
+      const value = 'VALUE-' + randomBytes(8).toString('hex');
+      const writePrompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it and acknowledge briefly.`;
+      const since = sinceNow();
+      const wTurn = await runTurn({ ctx, client: writer, project, prompt: writePrompt, scenarioId: this.id, label: 'write' });
+      const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
+      shared = ctx.meta.s02Writes[writer.id] = { m, value, wTurn, rb, readers: 0 };
+    }
+    shared.readers += 1;
+    const { m, value, wTurn, rb } = shared;
     const readPrompt = `Search your MidBrain memory for task ${m} and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say "not found after search".`;
     const expected = `Reader (${reader.displayName}) makes at least one MidBrain tool call whose input contains the marker verbatim and recovers the hidden verification value written by ${writer.displayName}; the reader prompt never contains that value.`;
-    const since = sinceNow();
-    const wTurn = await runTurn({ ctx, client: writer, project, prompt: writePrompt, scenarioId: this.id, label: `write-for-${reader.id}` });
-    const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
     const evidence = [relEvidence(ctx, wTurn.rawPath)];
     if (rb.user.length === 0) {
       return [cell({ row: 'Cross-client recall', scenario: this.id, client: reader, prompt: readPrompt, expected, evidence,
         notes: `writer ${writer.id} row never reached the API (${rb.elapsedMs} ms); recall not attempted`,
         checks: [check(`writer ${writer.id} user row reached the API`, false, `rows=${rb.rows.length}`)] })];
     }
-    await grace(ctx);
+    if (fresh) await grace(ctx); // indexing grace once per shared write
     const rTurn = await runTurn({ ctx, client: reader, project, prompt: readPrompt, scenarioId: this.id, label: `read-from-${writer.id}` });
     evidence.push(relEvidence(ctx, rTurn.rawPath), relEvidence(ctx, rTurn.jsonPath));
     const memCalls = rTurn.toolCalls.filter(isMidbrainTool);
-    const notes = `writer=${writer.id} (row visible after ${rb.elapsedMs} ms), reader=${reader.id}; midbrain calls=${memCalls.length}: ${memCalls.map((c) => c.name).join(', ') || 'none'}`;
+    const notes = `writer=${writer.id} (one shared checkpoint, row visible after ${rb.elapsedMs} ms; reader ${shared.readers} of this writer), reader=${reader.id}; midbrain calls=${memCalls.length}: ${memCalls.map((c) => c.name).join(', ') || 'none'}`;
     return [
       cell({ row: 'Cross-client recall', scenario: this.id, client: reader, prompt: readPrompt, expected, evidence, notes, checks: [
         ...turnChecks(rTurn),

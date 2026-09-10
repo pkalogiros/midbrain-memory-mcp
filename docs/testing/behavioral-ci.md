@@ -26,8 +26,8 @@ See [GitHub's manual-run documentation](https://docs.github.com/en/actions/how-t
 | Suite | Command | Interpretation |
 |---|---|---|
 | `smoke` (default) | `run --mode registry --scenarios s01,s06` | All five clients: capture and answer cleanliness. A green smoke is a checkpoint, not release approval. |
-| `simple` | `run --mode registry --upgrade --simple --approve-codex-hooks` | All scenarios, with five cross-client links in a cycle instead of twenty ordered pairs. A green simple run is reduced-coverage validation, not full required sign-off. |
-| `required` | `run --mode registry --upgrade --required --approve-codex-hooks` | Complete matrix with upgrades and native Codex approval automation. Requires a passing complete report before release sign-off. |
+| `simple` | `run --mode registry --upgrade --simple` | All scenarios, with five cross-client links in a cycle instead of twenty ordered pairs. A green simple run is reduced-coverage validation, not full required sign-off. |
+| `required` | `run --mode registry --upgrade --required` | Complete matrix with upgrades and native Codex approval automation. Requires a passing complete report before release sign-off. |
 
 Simple mode saves thirty cross-client prompts with five clients. It preserves the other
 scenario checks and records the cycle in the report and evidence bundle. Use it for broader
@@ -121,7 +121,7 @@ or unavailable Docker daemon can prevent container cleanup; VM disposal is the f
 Public tool/image caches are retained. No broad Docker prune or shared-home deletion occurs.
 
 The workflow does not publish packages, create releases, or merge branches. A full green
-unattended release gate still needs validation on Linux. `--approve-codex-hooks` checks
+unattended release gate still needs validation on Linux. Automatic native hook approval checks
 the exact three installed definitions through Codex, drives its native hook browser through
 a Python 3 standard-library PTY, and checks persisted trust in a fresh Codex process.
 The scenario still requires no capture before approval and capture afterward without

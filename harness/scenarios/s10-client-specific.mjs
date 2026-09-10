@@ -86,7 +86,7 @@ async function hookTrustPersisted({ ctx, api, client, project, scenarioId }) {
   const receipt = path.join(evidenceDir, 'approval-ui.txt');
   if (existsSync(receipt)) evidence.push(relEvidence(ctx, receipt));
   if (approved === null || approved === undefined) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-trust-persisted`, client, prompt, expected, evidence, checks,
-    blockedReason: 'Use --approve-codex-hooks for native UI automation, or --interactive in a terminal for manual /hooks approval. Bypass is not persisted approval.' });
+    blockedReason: 'Native hook approval did not run. Use --interactive in a terminal for manual /hooks approval, or omit it for automatic native UI approval. Bypass is not persisted approval.' });
   const afterMarker = m + '-approved';
   const afterSince = sinceNow();
   const after = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${afterMarker}`, scenarioId, label: 'after-approval', hookTrust: 'persisted' });
@@ -127,19 +127,27 @@ async function hookAcceptance({ ctx, api, client, project, scenarioId }) {
 }
 
 async function hookOrdering({ ctx, api, client, project, scenarioId }) {
+  const expected = 'Native UserPromptSubmit and Stop complete in order without harness replay.';
+  const checksFor = (t, rb) => [
+    ...turnChecks(t), ...captureCountChecks(rb.rows, t), ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId),
+    check('capture settled without API errors', !rb.timedOut && !rb.lastError),
+    check('user capture precedes assistant capture', Number.isFinite(Date.parse(rb.user[0]?.created_at)) && Date.parse(rb.user[0].created_at) <= Date.parse(rb.assistant[0]?.created_at)),
+  ];
+  // S1 already produced a native user + assistant capture with timestamps; ordering is
+  // scored on that evidence instead of a second identical turn.
+  const derived = ctx.meta?.captureEvidence?.[client.id];
+  if (derived) {
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-ordering`, client, expected,
+      evidence: derived.evidence, notes: 'derived from s01-capture (same native turn and read-back)', checks: checksFor(derived.turn, derived.rb) });
+  }
   const marker = ctx.subMarker(client.id, 'hook-order');
   const since = sinceNow();
   const t = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${marker}`, scenarioId, label: 'native-hooks' });
   const rb = await readback(ctx, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
   const file = path.join(ctx.evidenceDir(client.id, scenarioId), 'native-hooks.readback.json');
   ctx.writeJson(file, rb);
-  return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-ordering`, client,
-    expected: 'Native UserPromptSubmit and Stop complete in order without harness replay.',
-    evidence: [relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)], checks: [
-      ...turnChecks(t), ...captureCountChecks(rb.rows, t), ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId),
-      check('capture settled without API errors', !rb.timedOut && !rb.lastError),
-      check('user capture precedes assistant capture', Number.isFinite(Date.parse(rb.user[0]?.created_at)) && Date.parse(rb.user[0].created_at) <= Date.parse(rb.assistant[0]?.created_at)),
-    ] });
+  return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-ordering`, client, expected,
+    evidence: [relEvidence(ctx, t.jsonPath), relEvidence(ctx, file)], checks: checksFor(t, rb) });
 }
 
 async function pluginProcessSeparation({ ctx, api, client, project, scenarioId }) {

@@ -50,7 +50,7 @@ describe('native Codex approval inventory', () => {
 it.each(['passing', 'capture before approval', 'missing capture afterward', 'approval failed'])('retains native before/after capture scoring: %s', async condition => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-approval-scoring-'));
   try {
-    const ctx = createRunContext({ root, options: { approveCodexHooks: true } });
+    const ctx = createRunContext({ root });
     const cwd = ctx.projectDir('test');
     let approved = false;
     const rows = () => ['user', 'assistant'].map(role => ({ role, memory_metadata: { client: 'codex', session_id: 'session', cwd: '~/work/test' } }));
@@ -61,7 +61,7 @@ it.each(['passing', 'capture before approval', 'missing capture afterward', 'app
         return { exitCode: 0, finalText: 'marker', sessionId: 'session', rawPath: path.join(evidenceDir, `${label}.ndjson`) };
       },
       async approveHooks(received, project, evidenceDir) {
-        expect(received.options.approveCodexHooks).toBe(true);
+        expect(received.options.interactive).toBeFalsy();
         expect(project).toBe(cwd);
         fs.writeFileSync(path.join(evidenceDir, 'approval-ui.txt'), 'native receipt');
         approved = true;

@@ -111,8 +111,8 @@ jobs:
           set -euo pipefail
           case "$MIDBRAIN_CI_SUITE" in
             smoke) args=(--mode registry --scenarios s01,s06) ;;
-            simple) args=(--mode registry --upgrade --simple --approve-codex-hooks) ;;
-            required) args=(--mode registry --upgrade --required --approve-codex-hooks) ;;
+            simple) args=(--mode registry --upgrade --simple) ;;
+            required) args=(--mode registry --upgrade --required) ;;
             *) exit 2 ;;
           esac
           # Full output is private; the next step exports selected redacted evidence.

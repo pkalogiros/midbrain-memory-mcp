@@ -74,7 +74,7 @@ Existing coverage, by the checklist in the overview:
 |---|---|---|
 | Clean global / project install | `install.test.mjs`, `client-*.test.mjs`, `self-repair-safety.test.mjs` | — |
 | Upgrade from previous published version | `install.test.mjs` (update check, npx cache clear), `api-host-migration`, `hook-ownership`, NanoClaw cold-upgrade e2e | Implemented in registry/upgrade mode (§7); automatic 24 h update discovery and real-npm post-publish smoke remain separate |
-| Manual + startup self-repair | `self-repair-safety`, `hostile-home`, `shim-freshness`, `nanoclaw-topology.e2e`, `cache-boot-drain` | — |
+| Manual + startup self-repair | `self-repair-safety`, `hostile-home`, `shim`, `nanoclaw-topology.e2e`, `cache-boot-drain` | — |
 | Credential precedence, API host binding | `client-base`, `credential-*`, `keystore`, `api-host*`, `mcp-api-host` | — |
 | Per-client config formats | `client-{claude,codex,hermes,opencode,nanoclaw}` | — |
 | Tool registration / schemas | `mcp.test.mjs` only | thin, but exact (12 tools, exact names, schemas) |
@@ -180,7 +180,7 @@ credit calls from an earlier resumed turn.
 Claude's cold-first-turn case creates a separate fresh home and npm cache when an
 upgrade prelude has already warmed the main home. S1 in that warmed home is not
 credited as cold-start evidence. Codex's persisted-approval case opens the native
-UI with `--interactive` or automates that UI with `--approve-codex-hooks`, then checks
+UI automatically, or manually with `--interactive`, then checks
 capture in a fresh process without the bypass. Automation requires Codex 0.150.1 and Python 3;
 it validates the discovered definitions and their persisted hashes through `hooks/list`.
 
@@ -413,12 +413,12 @@ A complete release check currently follows this sequence:
 ```text
 programmatic CI + exact candidate archive
   → healthy dedicated API + pinned clients/models
-  → run --mode registry --upgrade --required --approve-codex-hooks
+  → run --mode registry --upgrade --required
   → export and verify release evidence against the intended archive and source SHA
   → Radu review → separately authorized publish
 ```
 
-The required run automates Codex's native hook browser with `--approve-codex-hooks`
+The required run automates Codex's native hook browser by default
 on Linux/macOS. Manual `--interactive` approval remains available. Both paths keep the
 no-capture-before/capture-after checks; a trust bypass does not satisfy persisted approval.
 

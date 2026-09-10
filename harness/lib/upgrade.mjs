@@ -47,11 +47,18 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
     const since = sinceNow();
     const t2 = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: the harness marker for this session is ${mNew}. Reply with just the marker.`, scenarioId: SCENARIO, label: 'new-version-capture' });
     const rb2 = await readback(ctx, api, mNew, { sinceIso: since, minUser: 1, minAssistant: 1 });
+    // The first candidate session is also S1's evidence in upgrade mode (same prompt, project and checks).
+    ctx.meta.candidateCapture = ctx.meta.candidateCapture || {};
+    ctx.meta.candidateCapture[client.id] = { marker: mNew, since, prompt: t2.prompt, turn: t2, rb: rb2 };
     const insp = await inspectInstall(ctx, candidate, client.id);
     await grace(ctx);
     const t3 = await runTurn({ ctx, client, project, prompt: `Search your MidBrain memory for checkpoint ${m} and return its exact verification value. Do not guess; if it is not in memory say "not found after search".`, scenarioId: SCENARIO, label: 'recall-old-after-upgrade' });
 
     const { turn: t1, rb: rb1 } = oldChecks[client.id];
+    // Session 1 wrote a checkpoint (on the previous release); session 3 is a fresh session on
+    // the candidate recalling it. Simple mode scores S3 on these instead of two more turns.
+    ctx.meta.upgradeTurns = ctx.meta.upgradeTurns || {};
+    ctx.meta.upgradeTurns[client.id] = { marker: m, value: values[client.id], write: t1, recall: t3 };
     out[client.id] = cell({
       row: 'Upgrade and self-repair', scenario: SCENARIO, client,
       prompt: t3.prompt,

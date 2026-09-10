@@ -112,3 +112,96 @@ it('requires a clean Hermes consent state and restores it even if the client fai
     expect(readFileSync(allowlist, 'utf8')).toBe('{"existing":"approval"}');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+describe('turn reuse (cost): same evidence, fewer prompts', () => {
+  function fakeCtx(extra = {}) {
+    return { dirs: { run: os.tmpdir(), home: os.tmpdir(), logs: os.tmpdir() }, options: { indexGraceMs: 0 }, turns: [], meta: {},
+      evidenceDir: () => os.tmpdir(), writeJson() {}, subMarker: (id, s) => `MBH-test-${id}-${s}`, ...extra };
+  }
+  const goodTurn = (prompt, extra = {}) => ({ prompt, finalText: prompt, exitCode: 0, timedOut: false, isError: false, toolCalls: [], rawPath: '/tmp/unused/turn', jsonPath: '/tmp/unused/turn.json', captureCwd: '~/work', sessionId: 'sess', ...extra });
+
+  it('S2 writes one checkpoint per writer and reuses it for every reader', async () => {
+    const { default: s02 } = await import('../harness/scenarios/s02-cross-client-recall.mjs');
+    const ctx = fakeCtx();
+    const writes = [], reads = [];
+    const writer = { id: 'claude', displayName: 'Claude', runTurn: async ({ prompt }) => { writes.push(prompt); return goodTurn(prompt); } };
+    const reader = (id) => ({ id, displayName: id, runTurn: async ({ prompt }) => { reads.push(prompt); return goodTurn(prompt, { toolCalls: [] }); } });
+    const api = { waitForRows: async () => ({ rows: [{ role: 'user', text: 'x' }], elapsedMs: 1, polls: 1, timedOut: false, lastError: null }) };
+    await s02.run({ ctx, api, writer, reader: reader('codex'), project: os.tmpdir() });
+    await s02.run({ ctx, api, writer, reader: reader('hermes'), project: os.tmpdir() });
+    expect(writes).toHaveLength(1);
+    expect(reads).toHaveLength(2);
+    expect(reads[0]).toContain('MBH-test-claude-xrecall');
+    expect(reads[1]).toContain('MBH-test-claude-xrecall');
+    expect(writes[0]).toMatch(/VALUE-[0-9a-f]{16}/);
+    expect(reads.join(' ')).not.toMatch(/VALUE-[0-9a-f]{16}/);
+  });
+
+  it('S1 scores the post-upgrade capture instead of running a second identical turn', async () => {
+    const { default: s01 } = await import('../harness/scenarios/s01-capture.mjs');
+    const meta = { client: 'claude', session_id: 'sess', cwd: '~/work' };
+    const rows = [{ role: 'user', text: 'MBH-x', memory_metadata: meta, created_at: '2026-09-10T00:00:00Z' }, { role: 'assistant', text: 'MBH-x', memory_metadata: meta, created_at: '2026-09-10T00:00:01Z' }];
+    const rb = { rows, user: [rows[0]], assistant: [rows[1]], elapsedMs: 1, polls: 1, timedOut: false, lastError: null };
+    const ctx = fakeCtx({ meta: { candidateCapture: { claude: { marker: 'MBH-x', prompt: 'p', turn: goodTurn('p'), rb } } } });
+    const client = { id: 'claude', expectedCaptureLabel: 'claude', runTurn: async () => { throw new Error('S1 must not spend a turn in upgrade mode'); } };
+    const api = { waitForRows: async () => { throw new Error('no read-back expected'); } };
+    const cells = await s01.run({ ctx, api, client, project: os.tmpdir() });
+    expect(cells.map(c => c.status)).toEqual(['PASS', 'PASS', 'PASS', 'PASS']);
+    expect(cells[0].notes).toContain('post-upgrade capture');
+    expect(ctx.meta.captureEvidence.claude.rb).toBe(rb);
+  });
+
+  it('hook ordering is derived from the S1 capture instead of a new turn', async () => {
+    const { default: s10 } = await import('../harness/scenarios/s10-client-specific.mjs');
+    const meta = { client: 'claude', session_id: 'sess', cwd: '~/work' };
+    const rows = [{ role: 'user', text: 'MBH-x', memory_metadata: meta, created_at: '2026-09-10T00:00:00Z' }, { role: 'assistant', text: 'MBH-x', memory_metadata: meta, created_at: '2026-09-10T00:00:01Z' }];
+    const rb = { rows, user: [rows[0]], assistant: [rows[1]], elapsedMs: 1, polls: 1, timedOut: false, lastError: null };
+    const ctx = fakeCtx({ meta: { captureEvidence: { claude: { turn: goodTurn('p'), rb, evidence: ['evidence/claude/s01-capture/turn-1.json'] } } } });
+    const client = { id: 'claude', expectedCaptureLabel: 'claude', specific: ['hook-ordering'], runTurn: async () => { throw new Error('must not spend a turn'); } };
+    const cells = await s10.run({ ctx, api: {}, client, project: os.tmpdir() });
+    expect(cells).toHaveLength(1);
+    expect(cells[0].status).toBe('PASS');
+    expect(cells[0].notes).toContain('derived from s01-capture');
+  });
+});
+
+it('S4 reuses the S1 global write instead of storing a second identical marker', async () => {
+  const { default: s04 } = await import('../harness/scenarios/s04-project-global-isolation.mjs');
+  const { HarnessApi } = await import('../harness/lib/api.mjs');
+  const path = await import('node:path');
+  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+  const root = mkdtempSync(path.join(os.tmpdir(), 's04-reuse-'));
+  const project = path.join(root, 'proj-a'); mkdirSync(project);
+  for (const p of ['proj-b', 'proj-c']) mkdirSync(path.join(root, p));
+  const rows = [{ role: 'user', text: 'marker for this session is MBH-s1' }];
+  const rb = { rows, user: rows, assistant: [], elapsedMs: 1, polls: 1, timedOut: false, lastError: null };
+  const ctx = { dirs: { run: root, home: root, logs: root }, options: { indexGraceMs: 0 }, turns: [], secrets: { MIDBRAIN_HARNESS_PROJECT_API_KEY: 'k2' },
+    meta: { projBInstalled: true, captureEvidence: { claude: { marker: 'MBH-s1', since: '2026-09-10T00:00:00.000Z', project, rb, evidence: ['evidence/claude/s01-capture/turn-1.ndjson'] } } },
+    projectDir: (n) => path.join(root, n), evidenceDir: () => root, writeJson() {}, subMarker: (id, s) => `MBH-${id}-${s}` };
+  const prompts = [];
+  const client = { id: 'claude', expectedCaptureLabel: 'claude', runTurn: async ({ prompt }) => { prompts.push(prompt); return { prompt, finalText: 'not found after search', exitCode: 0, timedOut: false, isError: false, toolCalls: [], rawPath: path.join(root, 't'), jsonPath: path.join(root, 't.json') }; } };
+  const api = { base: 'http://unused', listEpisodicSince: async () => [], waitForRows: async () => ({ rows, elapsedMs: 1, polls: 1, timedOut: false, lastError: null }) };
+  const spyList = vi.spyOn(HarnessApi.prototype, 'listEpisodicSince').mockResolvedValue([]);
+  const spyWait = vi.spyOn(HarnessApi.prototype, 'waitForRows').mockResolvedValue({ rows, elapsedMs: 1, polls: 1, timedOut: false, lastError: null });
+  try {
+    const [cellA] = await s04.run({ ctx, api, client, project, candidate: {} });
+    expect(prompts).toHaveLength(4); // write-proj-b + three asks; no write-proj-a
+    expect(prompts.filter(p => p.includes('MBH-claude-isoA'))).toHaveLength(0);
+    expect(prompts.some(p => p.includes('MBH-s1'))).toBe(true); // proj-c asks for the S1 marker
+    expect(cellA.notes).toContain('reused from s01-capture');
+    expect(spyList).toHaveBeenCalledWith('2026-09-10T00:00:00.000Z'); // leak check spans the S1 write
+  } finally { spyList.mockRestore(); spyWait.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+});
+
+it('S3 in simple mode is scored on the upgrade prelude turns instead of two more prompts', async () => {
+  const { default: s03 } = await import('../harness/scenarios/s03-fresh-session-continuity.mjs');
+  const turn = (prompt, sessionId, calls = []) => ({ prompt, sessionId, finalText: 'VALUE-abc', exitCode: 0, timedOut: false, isError: false, toolCalls: calls, rawPath: '/tmp/unused/t', jsonPath: '/tmp/unused/t.json' });
+  const recall = turn('recall', 'sess-2', [{ name: 'midbrain__memory_search', input: { query: 'MBH-pre' }, result: 'checkpoint MBH-pre has verification value VALUE-abc', ok: true }]);
+  const ctx = { dirs: { run: '/tmp/unused' }, options: { simple: true, indexGraceMs: 0 }, meta: { upgradeTurns: { claude: { marker: 'MBH-pre', value: 'VALUE-abc', write: turn('write', 'sess-1'), recall } } }, turns: [], subMarker: (id, s) => `MBH-${id}-${s}`, evidenceDir: () => '/tmp/unused', writeJson() {} };
+  const client = { id: 'claude', runTurn: async () => { throw new Error('must not spend a turn in simple mode'); } };
+  const cells = await s03.run({ ctx, api: {}, client, project: os.tmpdir() });
+  expect(cells.map(c => c.status)).toEqual(['PASS', 'PASS']);
+  expect(cells[0].notes).toContain('derived from the S9 upgrade prelude');
+  const full = { ...ctx, options: { simple: false, indexGraceMs: 0 } };
+  await expect(s03.run({ ctx: full, api: {}, client, project: os.tmpdir() })).rejects.toThrow('must not spend');
+});

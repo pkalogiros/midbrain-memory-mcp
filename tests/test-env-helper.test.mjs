@@ -14,7 +14,7 @@ import os from "os";
 import path from "path";
 
 import { makeTestEnv, assertSandboxed, diffSnapshots } from "./helpers/test-env.mjs";
-import { tripwireSurfaces, collectHashes, diffHashes, ABSENT } from "./helpers/global-tripwire.mjs";
+import { tripwireSurfaces, collectHashes, diffHashes, ABSENT, DIR } from "./helpers/global-tripwire.mjs";
 
 // Creating directory symlinks needs privilege on Windows (Developer Mode or an
 // elevated shell). Probe the real capability once so symlink-dependent tests
@@ -186,6 +186,21 @@ describe("snapshotTree / diffSnapshots churn detection", () => {
 });
 
 describe("tripwire internals (sandbox only)", () => {
+  it("honors an explicit NANOCLAW_HOME for the skill destination", () => {
+    const saved = process.env.NANOCLAW_HOME;
+    process.env.NANOCLAW_HOME = "/opt/ncw";
+    try {
+      // tripwireSurfaces resolves NANOCLAW_HOME with path.resolve (adds a drive
+      // letter on Windows); match that here rather than path.join.
+      expect(tripwireSurfaces(path.resolve(path.sep, "fake-home"))).toContain(
+        path.join(path.resolve("/opt/ncw"), ".claude", "skills", "add-midbrain", "SKILL.md"),
+      );
+    } finally {
+      if (saved === undefined) delete process.env.NANOCLAW_HOME;
+      else process.env.NANOCLAW_HOME = saved;
+    }
+  });
+
   it("covers every PRD-listed real surface", () => {
     // Use an absolute, platform-native fake home so path.join produces the
     // real separator style; then compare separator-agnostically (forward
@@ -202,6 +217,13 @@ describe("tripwire internals (sandbox only)", () => {
       "~/.codex/hooks.json",
       "~/.config/opencode/opencode.json",
       "~/.config/opencode/opencode.jsonc",
+      "~/.config/opencode/plugins/clients",
+      "~/.config/opencode/plugins/logger.mjs",
+      "~/.config/opencode/plugins/midbrain-api.mjs",
+      "~/.config/opencode/plugins/midbrain-common.mjs",
+      "~/nanoclaw-v2/.claude/skills/add-midbrain/SKILL.md",
+      "~/nanoclaw/.claude/skills/add-midbrain/SKILL.md",
+      "~/NanoClaw/.claude/skills/add-midbrain/SKILL.md",
       "~/.midbrain/bin/claude-hook",
       "~/.midbrain/bin/codex-hook",
       "~/.midbrain/bin/hermes-hook",
@@ -219,20 +241,27 @@ describe("tripwire internals (sandbox only)", () => {
     try {
       const a = path.join(env.home, "a.json");
       const b = path.join(env.home, "b.json");
+      const dir = path.join(env.home, "clients");
+      await fs.mkdir(dir);
       await fs.writeFile(a, "{}", "utf8");
 
-      const before = collectHashes([a, b]);
+      const before = collectHashes([a, b, dir]);
       expect(before[b]).toBe(ABSENT);
+      expect(before[dir]).toBe(DIR);
       expect(before[a]).toMatch(/^[0-9a-f]{64}$/);
-      expect(diffHashes(before, collectHashes([a, b]))).toEqual([]);
+      expect(diffHashes(before, collectHashes([a, b, dir]))).toEqual([]);
 
       await fs.writeFile(a, '{"changed":1}', "utf8"); // modify
       await fs.writeFile(b, "{}", "utf8"); // create
-      const after = collectHashes([a, b]);
+      const after = collectHashes([a, b, dir]);
       expect(diffHashes(before, after).sort()).toEqual([a, b].sort());
 
       await fs.rm(a); // delete registers as drift from the modified state
-      expect(diffHashes(after, collectHashes([a, b]))).toEqual([a]);
+      expect(diffHashes(after, collectHashes([a, b, dir]))).toEqual([a]);
+
+      const beforeDirRemoval = collectHashes([a, b, dir]);
+      await fs.rm(dir, { recursive: true });
+      expect(diffHashes(beforeDirRemoval, collectHashes([a, b, dir]))).toEqual([dir]);
     } finally {
       await env.restore();
     }

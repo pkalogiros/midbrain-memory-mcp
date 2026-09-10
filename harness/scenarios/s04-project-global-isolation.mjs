@@ -29,17 +29,28 @@ export default {
     }
     const api2 = new HarnessApi({ baseUrl: api.base, key: key2 });
     const mB = ctx.subMarker(client.id, 'isoB');
-    const mA = ctx.subMarker(client.id, 'isoA');
     const since = sinceNow();
     const evidence = [];
     const wB = await runTurn({ ctx, client, project: projB, prompt: `Please remember this exactly: the harness marker for this session is ${mB}. Reply with just the marker.`, scenarioId: this.id, label: 'write-proj-b' });
     evidence.push(relEvidence(ctx, wB.rawPath));
     const rbB = await readback(ctx, api2, mB, { sinceIso: since, minUser: 1 });
-    const wA = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: the harness marker for this session is ${mA}. Reply with just the marker.`, scenarioId: this.id, label: 'write-proj-a' });
-    evidence.push(relEvidence(ctx, wA.rawPath));
-    const rbA = await readback(ctx, api, mA, { sinceIso: since, minUser: 1 });
+    // The global-credential write from proj-a is S1's capture turn (same project, credential
+    // and prompt); reuse its marker and read-back instead of writing a second identical row.
+    const s1 = ctx.meta.captureEvidence?.[client.id];
+    const reuseA = Boolean(s1?.marker && s1.project === project);
+    let mA, rbA, sinceA;
+    if (reuseA) {
+      ({ marker: mA, rb: rbA, since: sinceA } = s1);
+      evidence.push(...s1.evidence.slice(0, 1));
+    } else {
+      mA = ctx.subMarker(client.id, 'isoA');
+      sinceA = since;
+      const wA = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: the harness marker for this session is ${mA}. Reply with just the marker.`, scenarioId: this.id, label: 'write-proj-a' });
+      evidence.push(relEvidence(ctx, wA.rawPath));
+      rbA = await readback(ctx, api, mA, { sinceIso: since, minUser: 1 });
+    }
     const leakB = await api.listEpisodicSince(since);
-    const leakA = await api2.listEpisodicSince(since);
+    const leakA = await api2.listEpisodicSince(sinceA);
     await grace(ctx);
     const askAforB = await runTurn({ ctx, client, project, prompt: askFor(mB), scenarioId: this.id, label: 'ask-proj-a-for-b' });
     const askBforB = await runTurn({ ctx, client, project: projB, prompt: askFor(mB), scenarioId: this.id, label: 'ask-proj-b-for-b' });
@@ -50,7 +61,7 @@ export default {
     const storedPhrase = (m) => `marker for this session is ${m}`;
     const memHit = (t, m) => t.toolCalls.filter(isMidbrainTool).some((c) => resultText(c).includes(storedPhrase(m)) || resultText(c).split('\n').some((line) => line.includes(m) && !/search|token|not found/i.test(line)));
     const memAsked = (t, m) => t.toolCalls.filter(isMidbrainTool).some((c) => inputText(c).includes(m));
-    return [cell({ row: 'Project and global isolation', scenario: this.id, client, prompt: askFor('<marker>'), expected, evidence, checks: [
+    return [cell({ row: 'Project and global isolation', scenario: this.id, client, prompt: askFor('<marker>'), expected, evidence, notes: reuseA ? 'global-credential write reused from s01-capture (same project, credential and prompt)' : '', checks: [
       check('proj-b marker stored under the project credential', rbB.user.length >= 1, `rows=${rbB.user.length}`),
       check('proj-a marker stored under the global credential', rbA.user.length >= 1, `rows=${rbA.user.length}`),
       check('proj-b marker is not present in the global credential store', !leakB.some((r) => String(r.text ?? '').includes(mB))),

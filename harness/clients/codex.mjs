@@ -118,8 +118,8 @@ export default {
   },
 
   async approveHooks(ctx, project, evidenceDir) {
-    if (ctx.options.approveCodexHooks) return approveCodexHooks(ctx, project, this.clientEnv(ctx), evidenceDir);
-    if (!ctx.options.interactive || !process.stdin.isTTY) return null;
+    if (!ctx.options.interactive) return approveCodexHooks(ctx, project, this.clientEnv(ctx), evidenceDir);
+    if (!process.stdin.isTTY) return null;
     console.error('Approve only the three MidBrain hooks in /hooks, then exit Codex with /quit. The next turn verifies persisted approval without a bypass.');
     const args = ['--no-alt-screen', '-C', project];
     const model = (process.env.MIDBRAIN_HARNESS_CODEX_MODEL || '').trim();
