@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { loadDotEnv, collectSecrets } from './lib/env.mjs';
 import { createRunContext, defaultRoot, HARNESS_DIR, HARNESS_VERSION } from './lib/context.mjs';
 import { freezeCandidate, assertCandidate } from './lib/candidate.mjs';
-import { selectManifests, ORDER, MANIFESTS } from './clients/index.mjs';
+import { selectManifests, clientPairs, ORDER, MANIFESTS } from './clients/index.mjs';
 import { selectScenarios, SCENARIOS } from './scenarios/index.mjs';
 import { HarnessApi, DEFAULT_API_BASE } from './lib/api.mjs';
 import { snapshot, diff, keyCollidesWithRealHome } from './lib/tripwire.mjs';
@@ -140,6 +140,7 @@ async function runScenario(sc, args, cells, creditClient) {
 }
 
 async function run(flags) {
+  if (flags.simple && flags.required) throw new Error('--simple cannot be combined with --required; the required gate checks every ordered client pair');
   loadDotEnv(path.join(HARNESS_DIR, '.env'));
   const secrets = collectSecrets();
   const key = secrets.MIDBRAIN_HARNESS_API_KEY;
@@ -161,6 +162,7 @@ async function run(flags) {
       pollIntervalMs: num(flags['poll-interval-ms'], 5000),
       keep: Boolean(flags.keep),
       required: Boolean(flags.required),
+      simple: Boolean(flags.simple),
       interactive: Boolean(flags.interactive),
       approveCodexHooks: Boolean(flags['approve-codex-hooks']),
       upgrade,
@@ -277,26 +279,32 @@ async function run(flags) {
       for (const m of active) cells.push(cell({ row: 'Upgrade and self-repair', scenario: 's09-upgrade-continuity', client: m, blockedReason: e.blocked ? e.message : undefined, checks: [check('upgrade prelude completed without harness error', false, (e.stack || String(e)).slice(0, 800))] }));
     }
   }
+  // A simple cycle includes unavailable clients so missing coverage stays BLOCKED.
+  const pairs = clientPairs(ctx.options.simple ? manifests : active, ctx.options.simple);
+  const crossClientPairs = scenarios.some(sc => sc.kind === 'pair') ? pairs.map(({ writer, reader }) => ({ writer: writer.id, reader: reader.id })) : [];
+  log(`cross-client coverage: ${ctx.options.simple ? 'simple cycle' : 'all ordered pairs'}; ${crossClientPairs.length} planned link(s)`);
   for (const sc of scenarios) {
     if (sc.kind === 'pair') {
-      if (active.length < 2) {
+      if (pairs.length === 0) {
         for (const m of active) cells.push(...blockedCells(['Cross-client recall'], sc.id, m, 'fewer than two runnable clients in this run'));
       } else {
-        for (const writer of active) {
-          for (const reader of active) {
-            if (writer.id === reader.id) continue;
-            await runScenario(sc, { ctx, api, writer, reader, project: projA, candidate }, cells, reader);
+        for (const { writer, reader } of pairs) {
+          const unavailable = clientStates.find(st => !st.runnable && (st.id === writer.id || st.id === reader.id));
+          if (unavailable) {
+            cells.push(...blockedCells(sc.rows, sc.id, reader, `${unavailable.id}: ${unavailable.blockedReason}`, { notes: `writer=${writer.id}, reader=${reader.id}` }));
+            continue;
           }
+          await runScenario(sc, { ctx, api, writer, reader, project: projA, candidate }, cells, reader);
         }
       }
-      for (const st of inactive) cells.push(...blockedCells(sc.rows, sc.id, st.manifest, st.blockedReason));
+      if (!ctx.options.simple || pairs.length === 0) for (const st of inactive) cells.push(...blockedCells(sc.rows, sc.id, st.manifest, st.blockedReason));
     } else {
       for (const st of clientStates) {
         if (!st.runnable) { cells.push(...blockedCells(sc.rows, sc.id, st.manifest, st.blockedReason)); continue; }
         await runScenario(sc, { ctx, api, client: st.manifest, project: projA, candidate }, cells, st.manifest);
       }
     }
-    ctx.writeJson(path.join(ctx.dirs.run, 'results.partial.json'), { cells });
+    ctx.writeJson(path.join(ctx.dirs.run, 'results.partial.json'), { run: { simple: ctx.options.simple, crossClientPairs }, cells });
   }
 
   // Tool availability: prefer init/real tool calls; otherwise probe the client's
@@ -339,6 +347,8 @@ async function run(flags) {
     harnessVersion: HARNESS_VERSION,
     run: {
       required: ctx.options.required,
+      simple: ctx.options.simple,
+      crossClientPairs,
       runId: ctx.runId, marker: ctx.marker, platform: ctx.platform, arch: ctx.arch, osRelease: ctx.osRelease, node: ctx.node,
       startedAt: ctx.startedAt, finishedAt: new Date().toISOString(),
       readbackTimeoutMs: ctx.options.readbackTimeoutMs, indexGraceMs: ctx.options.indexGraceMs,
@@ -390,9 +400,13 @@ function help() {
 commands
   doctor   [--clients a,b]          readiness of this machine (clients, secrets, API, run root)
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
-  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--required] [--keep]
+  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR]
+           [--approve-codex-hooks | --interactive]
   report   <runDir>                 re-render report.md from results.json
+
+--simple: cross-client recall uses one directed cycle; other scenarios are unchanged.
+          Without --simple, all ordered pairs run. Cannot combine with --required.
 
 clients:   ${ORDER.join(', ')}
 scenarios: ${SCENARIOS.map((s) => s.id).join(', ')}

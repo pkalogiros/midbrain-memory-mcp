@@ -150,6 +150,25 @@ only the three installed MidBrain hooks and exit with `/quit`. Without either fl
 the approval cell remains BLOCKED. Claude cold-first-turn coverage creates a
 separate fresh home when the main home has already run an upgrade prelude.
 
+For a smaller run that retains the other scenarios, add `--simple`:
+
+```bash
+node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
+```
+
+Cross-client recall follows one cycle in manifest order:
+OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode. Every client writes once
+and reads once. This uses five pairs / ten prompts instead of twenty pairs / forty
+prompts. All other selected scenarios and their pass/fail checks are unchanged;
+the savings apply to cross-client recall, not the entire bill.
+
+Client subsets form a cycle in the same stable order; at least two clients are needed
+for cross-client recall. Unavailable clients keep their place and affected links are
+BLOCKED. `results.json`, the report and exported evidence record simple mode and the
+planned links. A passing simple run is reduced-coverage validation, not full required
+sign-off. `--simple --required` is rejected; omit `--simple` for all ordered pairs.
+No live simple matrix has been recorded yet; selection and evidence handling are unit-tested.
+
 NanoClaw retains a per-group npm cache populated by its installer. Deployments
 using ephemeral homes need the same durable cache mount (`/home/node/.npm`) to
 avoid simultaneous cold npm installs by MCP and capture hooks. Upgrade validation
@@ -189,7 +208,7 @@ distinguishes current checks from unvalidated or missing coverage. Follow the
 ## GitHub Actions
 
 A manual [behavioral workflow](../.github/workflows/behavioral.yml) is implemented with
-smoke/required suites, pinned models/clients, selected artifacts and scoped cleanup.
+smoke/simple/required suites, pinned models/clients, selected artifacts and scoped cleanup.
 It has not been deployed or run in the cloud. See [runner and secret setup](../docs/testing/behavioral-ci.md).
 The required suite uses `--approve-codex-hooks` and retains the before/after capture proof.
 Native approval automation is implemented; a full unattended Linux run still needs validation.

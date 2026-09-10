@@ -26,7 +26,13 @@ See [GitHub's manual-run documentation](https://docs.github.com/en/actions/how-t
 | Suite | Command | Interpretation |
 |---|---|---|
 | `smoke` (default) | `run --mode registry --scenarios s01,s06` | All five clients: capture and answer cleanliness. A green smoke is a checkpoint, not release approval. |
+| `simple` | `run --mode registry --upgrade --simple --approve-codex-hooks` | All scenarios, with five cross-client links in a cycle instead of twenty ordered pairs. A green simple run is reduced-coverage validation, not full required sign-off. |
 | `required` | `run --mode registry --upgrade --required --approve-codex-hooks` | Complete matrix with upgrades and native Codex approval automation. Requires a passing complete report before release sign-off. |
+
+Simple mode saves thirty cross-client prompts with five clients. It preserves the other
+scenario checks and records the cycle in the report and evidence bundle. Use it for broader
+iteration after smoke; only `required` establishes the existing exhaustive release gate.
+The selection logic and evidence handling are unit-tested; a live simple matrix remains unvalidated.
 
 Models: Haiku 4.5 by default, or Sonnet 5 for the four Anthropic-backed clients. Codex uses
 the pinned `gpt-5.6-sol` model with **OpenAI API billing**, not a personal ChatGPT login.

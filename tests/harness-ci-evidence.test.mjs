@@ -38,6 +38,18 @@ function fixture(required = false) {
 }
 
 describe('CI evidence finalization', () => {
+  it.each(['PASS', 'FAIL'])('exports a simple %s run as a checkpoint', status => {
+    const f = fixture();
+    f.result.run.simple = true;
+    f.result.cells[0].status = status;
+    f.result.cells[0].checks[0].ok = status === 'PASS';
+    f.save();
+    expect(collectCiEvidence({ ...f.options, suite: 'simple' })).toEqual({ verified: false, bundle: true, error: false });
+    const summary = fs.readFileSync(path.join(f.options.output, 'summary.md'), 'utf8');
+    expect(summary).toContain('Behavioral simple run');
+    expect(summary).toContain('CHECKPOINT');
+    expect(summary).toContain(`FAIL: ${status === 'FAIL' ? 1 : 0}`);
+  });
   it('keeps a successful smoke run labelled as a checkpoint', () => {
     const f = fixture(); f.save();
     expect(collectCiEvidence(f.options)).toEqual({ verified: false, bundle: true, error: false });

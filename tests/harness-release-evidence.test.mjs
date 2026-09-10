@@ -94,9 +94,14 @@ describe('release evidence bundle', () => {
     expect(() => verifyBundle(f.bundle, f.archive, f.sha)).toThrow('checksum');
   });
 
-  it.each(['focused', 'failed', 'blocked', 'missing-pair', 'missing-approval', 'missing-check', 'dirty', 'drift', 'no-model'])('exports %s evidence honestly but refuses release verification', reason => {
+  it.each(['focused', 'simple', 'failed', 'blocked', 'missing-pair', 'missing-approval', 'missing-check', 'dirty', 'drift', 'no-model'])('exports %s evidence honestly but refuses release verification', reason => {
     const f = fixture();
     if (reason === 'focused') f.value.run.required = false;
+    // Even if mislabelled required and containing enough cells, simple is not full coverage.
+    if (reason === 'simple') {
+      f.value.run.simple = true;
+      f.value.run.crossClientPairs = [{ writer: 'claude', reader: 'codex' }];
+    }
     if (reason === 'failed') f.value.cells[0].status = 'FAIL';
     if (reason === 'blocked') f.value.cells[0].status = 'BLOCKED';
     if (reason === 'missing-pair') f.value.cells.splice(f.value.cells.findIndex(c => c.scenario.startsWith('s02')), 1);
@@ -109,6 +114,13 @@ describe('release evidence bundle', () => {
     expect(exportBundle(f.run, f.bundle).problems.length).toBeGreaterThan(0);
     expect(verifyBundle(f.bundle, f.archive, f.sha).length).toBeGreaterThan(0);
     expect(fs.readFileSync(path.join(f.bundle, 'README.md'), 'utf8')).toContain('CHECKPOINT');
+    if (reason === 'simple') {
+      const exported = JSON.parse(fs.readFileSync(path.join(f.bundle, 'results.json'), 'utf8'));
+      expect(exported.run.simple).toBe(true);
+      expect(exported.run.crossClientPairs).toEqual(f.value.run.crossClientPairs);
+      expect(fs.readFileSync(path.join(f.bundle, 'report.md'), 'utf8')).toContain('Simple cycle');
+      expect(verifyBundle(f.bundle, f.archive, f.sha)).toContain('Simple cycle is reduced coverage, not the full required matrix');
+    }
   });
 
   it('refuses incomplete runs, symlinked evidence, and exporting into the source run', () => {

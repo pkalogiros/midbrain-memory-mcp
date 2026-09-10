@@ -81,6 +81,7 @@ export function redactor(secrets, root) {
 
 export function gateProblems(results) {
   const problems = [];
+  if (results.run?.simple) problems.push('Simple cycle is reduced coverage, not the full required matrix');
   if (!results.run?.finishedAt || !Number.isFinite(Date.parse(results.run.finishedAt))) problems.push('Run is incomplete');
   if (results.run?.required !== true || results.candidate?.mode !== 'registry' || results.candidate?.registry?.published !== true) problems.push('A full required registry/upgrade run is needed');
   if (results.candidate?.dirty !== false) problems.push('Candidate source was dirty or its status is unknown');
@@ -133,7 +134,7 @@ export function exportBundle(runDir, output, secrets = []) {
   const scrub = redactor(runSecrets(root, secrets), root);
   const results = scrub({
     harnessVersion: source.harnessVersion,
-    run: pick(source.run, ['required', 'runId', 'marker', 'platform', 'arch', 'osRelease', 'node', 'startedAt', 'finishedAt', 'readbackTimeoutMs', 'indexGraceMs', 'models']),
+    run: pick(source.run, ['required', 'simple', 'crossClientPairs', 'runId', 'marker', 'platform', 'arch', 'osRelease', 'node', 'startedAt', 'finishedAt', 'readbackTimeoutMs', 'indexGraceMs', 'models']),
     candidate: candidateSummary(candidate),
     clients: source.clients.map(c => pick(c, ['id', 'displayName', 'version', 'runnable', 'blockedReason', 'knownExceptions', 'mechanism', 'configShape'])),
     cells: source.cells.map(c => pick(c, ['row', 'scenario', 'client', 'clientDisplay', 'status', 'checks', 'prompt', 'expected', 'evidence', 'notes', 'blockedReason'])),

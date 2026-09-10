@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Smoke, or full required matrix with native Codex hook approval'
+        description: 'Smoke, simple cycle, or full required matrix'
         type: choice
-        options: [smoke, required]
+        options: [smoke, simple, required]
         default: smoke
       anthropic_model:
         description: 'Anthropic model used by Claude, OpenCode, Hermes and NanoClaw'
@@ -111,6 +111,7 @@ jobs:
           set -euo pipefail
           case "$MIDBRAIN_CI_SUITE" in
             smoke) args=(--mode registry --scenarios s01,s06) ;;
+            simple) args=(--mode registry --upgrade --simple --approve-codex-hooks) ;;
             required) args=(--mode registry --upgrade --required --approve-codex-hooks) ;;
             *) exit 2 ;;
           esac

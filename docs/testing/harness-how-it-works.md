@@ -44,7 +44,7 @@ integrations and the full host dispatcher are not exercised.
    product's own client adapters whether each install is present and "fresh" (canonical hooks,
    plugin, shim).
 6. **Scenarios, in a fixed order.** S1 capture, S6 no-match, S8 literal markers, S3 fresh-session
-   continuity, S2 cross-client recall (every ordered pair of clients), S5 current-vs-stale,
+   continuity, S2 cross-client recall (every ordered pair by default; one cycle with `--simple`), S5 current-vs-stale,
    S4 project/global isolation, S9 upgrade continuity, S10 client-specific cases. The S9
    upgrade prelude runs before this sequence. Clients execute real sessions; exact prompts,
    raw streams and normalised turns are saved. Capture and recall scenarios use markers,
@@ -113,7 +113,7 @@ client-specific behavior can require additional cases; those are declared by the
 | `_shared.mjs` | `runTurn` (persists prompt, turn, asserts frozen inputs), `readback` (poll by marker), metadata and turn checks, cell constructor. |
 | `index.mjs` | Execution order. |
 | `s01-capture.mjs` | User and assistant rows reach the API with matching client/session/cwd metadata and marker text. Exactly one user capture and one capture per native assistant reply. |
-| `s02-cross-client-recall.mjs` | Writer stores a hidden value; a different client's fresh session must retrieve it through a MidBrain call. All ordered pairs. |
+| `s02-cross-client-recall.mjs` | Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. All ordered pairs by default; `--simple` selects one directed cycle. |
 | `s03-fresh-session-continuity.mjs` | A checkpoint written in one session is recovered in a new session of the same client. |
 | `s04-project-global-isolation.mjs` | Project-scoped key isolates from global; global fallback works from an unscoped directory. |
 | `s05-freshness-reconciliation.mjs` | After an update, a new session names the current value as current, as JSON, citing memory evidence. Conflicting live repository/file state is not tested. |
@@ -172,8 +172,9 @@ The YAML file is the source of truth; there is no second workflow example in thi
   `MIDBRAIN_HARNESS_API_URL` as a variable. Keys enter the relevant steps as environment
   variables; the workflow does not generate `harness/.env`.
 - **Trigger:** manual `workflow_dispatch` only. No push, release or scheduled trigger.
-- **Suites:** smoke runs S1/S6; required runs the full registry+upgrade matrix. Both preserve
-  failing exit codes. Smoke success is not release sign-off.
+- **Suites:** smoke runs S1/S6; simple retains all scenarios with one cross-client cycle;
+  required runs the full registry+upgrade matrix. All preserve failing exit codes.
+  Smoke and simple success are not full required sign-off.
 
 From the repository root, with the documented credentials and a durable run root configured:
 
@@ -181,6 +182,11 @@ From the repository root, with the documented credentials and a durable run root
 node harness/run.mjs doctor
 node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
 ```
+
+For lower-cost iteration, replace `--required` with `--simple`. The five-client cycle is
+OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode: ten cross-client prompts
+instead of forty. Other scenarios remain unchanged. Reports and bundles label the reduced
+coverage; `--simple` cannot be combined with `--required`. Missing clients leave blocked links.
 
 Native approval automation requires Python 3 and Codex 0.150.1 on Linux/macOS. It checks
 exactly three untrusted MidBrain hooks, uses Codex's native UI, and verifies persisted trust.

@@ -50,7 +50,8 @@ export function renderMarkdown(results) {
   lines.push('');
   lines.push('| Field | Value |');
   lines.push('|---|---|');
-  lines.push(`| Run type | ${run.required ? 'Required matrix' : 'Focused validation'} |`);
+  lines.push(`| Run type | ${run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
+  if (run.crossClientPairs) lines.push(`| Planned cross-client links | ${run.crossClientPairs.map(p => `${esc(p.writer)} → ${esc(p.reader)}`).join(', ') || 'None selected'} |`);
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
   if (candidate.pack && !candidate.pack.error) lines.push(`| Source archive | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);
   if (candidate.tarballSha256) lines.push(`| Tested archive SHA-256 | ${candidate.tarballSha256} |`);
