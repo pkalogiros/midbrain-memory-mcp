@@ -16,7 +16,9 @@ For changes covered by the multi-client harness:
 1. Select the release source SHA, candidate archive and pinned client/model configuration.
    Run programmatic CI for that source; retain the passing OS jobs in the release review.
 2. Run `node harness/run.mjs run --mode registry --upgrade --required --interactive`
-   against a healthy dedicated test API. Native Codex hook approval currently needs a terminal.
+   against a healthy dedicated test API. `--interactive` uses a terminal for native
+   Codex approval; `--approve-codex-hooks` can instead drive the pinned native UI
+   (see the workflow guide for its validation boundary).
 3. Export the completed run using
    `node harness/scripts/release-evidence.mjs export <run> <new-bundle>`.
    Review the redacted bundle before attaching it to the release review; never upload the run home.
@@ -28,7 +30,7 @@ For changes covered by the multi-client harness:
    Record remaining coverage boundaries from the [coverage map](../testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership).
 6. Publishing remains a separate authorized release action. The manual
    [behavioral workflow](../testing/behavioral-ci.md) is built but not deployed or cloud-validated;
-   native Codex approval prevents unattended sign-off. It does not enforce product review or
+   unattended native Codex approval is implemented but still needs Linux validation. It does not enforce product review or
    publishing, and no real-npm post-publish upgrade smoke mode exists yet.
 
 Focused passes and incomplete/blocked reports are checkpoints, not release approval.

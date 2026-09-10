@@ -195,8 +195,8 @@ run home; `CLAUDE_CONFIG_DIR` is unset so Claude reads the installer's `$HOME/.c
 ### 4.3 Run identity, homes, and projects
 
 - One **run** = one run id, one **run marker** `MBH-<6 hex>`, one throwaway home shared by all
-  selected clients (mirrors a real user machine and exercises cross-client convergence), two
-  project dirs `proj-a` and `proj-b` (each with a `.git` so project rules can be written), and
+  selected clients (mirrors a real user machine and exercises cross-client convergence), three
+  project dirs `proj-a`, `proj-b`, and `proj-c` (each with a `.git` so project rules can be written), and
   one evidence bundle. `--isolated-homes` gives each client its own home when triaging.
 - Run root defaults to `~/.midbrain-harness/runs/<run-id>/` (durable, outside tmp, outside the
   repo so lint and Vitest never see it). Override with `MIDBRAIN_HARNESS_ROOT`.

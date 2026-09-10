@@ -1,5 +1,8 @@
 # Multi-client harness validation — 2026-09-08
 
+> Historical checkpoint: the run outcomes below are retained as evidence. For
+> current execution and release requirements, see the [operator guide](harness-how-it-works.md).
+
 **Focused validation passed; the latest required matrix was interrupted by an
 Anthropic billing error. There is no complete passing release matrix yet.**
 

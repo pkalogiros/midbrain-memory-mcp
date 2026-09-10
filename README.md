@@ -44,7 +44,7 @@ npx midbrain-memory-mcp install --no-login
 
 ### 3. Restart and verify
 
-Restart OpenCode, Claude Code, or Codex. The `memory_search` tool should be
+Restart your configured client (including any running Hermes gateway). The `memory_search` tool should be
 available. Send a few messages, then search; your messages should appear.
 
 ```sh
@@ -57,7 +57,7 @@ npx -y midbrain-memory-mcp@latest --version
 ## How It Works
 
 ```
-OpenCode / Claude Code / Codex session
+OpenCode / Claude Code / Codex / Hermes / NanoClaw session
   |
   |-- MCP stdio -----> index.js -------> memory.midbrain.ai
   |                    (search, browse)    /api/v1/memories/search
@@ -385,10 +385,13 @@ version. The MCP server logs the resolved package version to stderr on startup.
 
 | Variable | Purpose | Set by |
 |---|---|---|
-| `MIDBRAIN_CLIENT` | Which client adapter to use (`opencode`, `claude`, `codex`, or `nanoclaw`) | MCP config `environment`/`env` block |
+| `MIDBRAIN_CLIENT` | Which client adapter to use (`opencode`, `claude`, `codex`, `hermes`, or `nanoclaw`) | MCP config `environment`/`env` block |
 | `MIDBRAIN_PROJECT_DIR` | Project dir for per-project key resolution | Project-level MCP config |
 | `MIDBRAIN_API_KEY` | API key for CI/debug environments | User environment |
 | `MIDBRAIN_API_URL` | Highest-priority API-host override for development and compatibility | User process environment |
+| `MIDBRAIN_USER_API_KEY` | Account-level user key fallback | User environment |
+| `MIDBRAIN_CAPTURE_CLIENT` | Capture metadata label override (for example, `nanoclaw`) | Hook/MCP environment |
+| `MIDBRAIN_STATE_DIR` | Relocate shared key/keystore/config, shims and cache to a durable root | NanoClaw skill; startup migration infers it for recognized legacy groups |
 
 ### API Host Resolution
 
@@ -665,7 +668,7 @@ Codex adapter uses `smol-toml`. The parser is lazily imported and marked
 ### Logging
 
 Capture hooks and plugins write debug logs to a platform-appropriate
-directory (not your home directory):
+directory:
 
 | Platform | Log directory |
 |---|---|
@@ -674,7 +677,7 @@ directory (not your home directory):
 | Windows | `%LOCALAPPDATA%\midbrain\logs` |
 
 Per-client files: `midbrain-opencode.log`, `midbrain-claude.log`,
-`midbrain-codex.log`.
+`midbrain-codex.log`, and `midbrain-hermes.log`.
 
 - Logs default to the `info` level. Per-request detail (individual REST
   calls, payload sizes) is logged at `debug` and suppressed by default.
@@ -714,7 +717,7 @@ The skill instructs Claude Code to:
 4. Directly merge Claude capture hooks into
    `data/v2-sessions/<group-id>/.claude-shared/settings.json`
 5. Write canonical shim-form capture hooks —
-   `'/home/node/.midbrain/bin/claude-hook' user|assistant` — while the MCP
+   `'/home/node/.claude/.midbrain/bin/claude-hook' user|assistant` — while the MCP
    server persists its env key to the global key file at server start for
    hook child processes. The shim re-resolves through the published package
    instead of a pinned package-store path. Legacy inline-key
@@ -726,7 +729,11 @@ The skill instructs Claude Code to:
    and restart only after approval
 
 After the skill completes, agents have full memory search and automatic
-episodic capture. Memory persists server-side across container restarts.
+episodic capture. Memory persists server-side across container restarts. The skill sets
+`MIDBRAIN_STATE_DIR=/home/node/.claude/.midbrain` so keys, shims and offline
+cache also survive on the durable `.claude-shared` mount. Recognized legacy
+groups infer this root at startup and prepare the key, hooks and compatibility
+shim before MCP readiness.
 Captures from NanoClaw groups are labeled `nanoclaw` in memory metadata via
 the `.claude-shared/.midbrain-capture-client` marker the skill writes.
 
@@ -739,7 +746,7 @@ bash bin/ncl groups config add-mcp-server \
   --name midbrain-memory \
   --command npx \
   --args '["-y", "midbrain-memory-mcp@latest"]' \
-  --env '{"MIDBRAIN_CLIENT":"claude","MIDBRAIN_API_KEY":""}'
+  --env '{"MIDBRAIN_CLIENT":"claude","MIDBRAIN_CAPTURE_CLIENT":"nanoclaw","MIDBRAIN_STATE_DIR":"/home/node/.claude/.midbrain","MIDBRAIN_API_KEY":"<redacted>"}'
 
 # Restart to apply
 bash bin/ncl groups restart --id <agent-group-id> --message "Added midbrain memory"
@@ -747,8 +754,9 @@ bash bin/ncl groups restart --id <agent-group-id> --message "Added midbrain memo
 
 Note: Manual `add-mcp-server` gives MCP tools only (search, browse). Episodic
 capture requires the direct `.claude-shared/settings.json` settings merge
-performed by the skill. Those hooks call the stable
-`~/.midbrain/bin/claude-hook` shim, never
+performed by the skill. Replace the `<redacted>` placeholder locally with the
+group credential. Those hooks call the stable
+`~/.claude/.midbrain/bin/claude-hook` shim, never
 `/pnpm/.../midbrain-memory-mcp@<version>/...` paths, and the MCP server
 persists its env `MIDBRAIN_API_KEY` to the global key file at server start so
 hook child processes can authenticate without container env passthrough.
@@ -922,8 +930,8 @@ chmod 600 /path/to/.midbrain-key   # Fix permissions
 ## API Reference
 
 Base URL: `https://memory.midbrain.ai`
-Auth: send an `Authorization` header with your local API key, except for
-`/health`.
+Auth: send `Authorization: Bearer <agent-api-key>` for the memory endpoints
+below. Account tools use a separate user API key. `/health` is unauthenticated.
 
 | Method | Endpoint | Params / Body | Returns |
 |---|---|---|---|
@@ -938,10 +946,10 @@ Auth: send an `Authorization` header with your local API key, except for
 
 `memory_metadata` on POST is optional. Values must be strings. Capture hooks
 always tag each memory with the originating client (`opencode`, `claude`,
-`nanoclaw`, `codex`, or `hermes`). When the harness provides them, hooks
+`nanoclaw`, `codex`, or `hermes`). When the originating client provides them, hooks
 also add scoping fields: `cwd` (own-home paths use `~/`, other-user home
 names are redacted, and non-user system paths remain absolute) and
-`session_id` (the harness's own session/conversation id, forwarded verbatim).
+`session_id` (the client's session/conversation id, forwarded verbatim).
 Both are omitted when unavailable or blank.
 
 ---
@@ -1013,6 +1021,8 @@ shared/
     opencode.mjs               OpenCode adapter (JSONC config, plugin copy)
     claude.mjs                 Claude Code adapter (hooks, .mcp.json)
     codex.mjs                  Codex adapter (TOML config, hooks.json)
+    hermes.mjs                 Hermes adapter (YAML config, shell hooks)
+    nanoclaw.mjs               NanoClaw skill installation
     generic.mjs                Fallback adapter
     registry.mjs               getClient(id), detectClients()
 plugins/
@@ -1021,6 +1031,9 @@ plugins/
     midbrain-shared.mjs        Dev shim (re-exports from ../../shared/)
   claude-code/                 Claude Code hook scripts (Node 20, episodic capture)
   codex/                       Codex hook scripts (Node 20, episodic capture)
+  hermes/                      Hermes shell-hook capture scripts
+skills/
+  nanoclaw/                    Bundled /add-midbrain skill
 dist/
   midbrain-shared.mjs          Built bundle (all of shared/ in one file)
 scripts/                       CI guards (pinned-spec regression)
