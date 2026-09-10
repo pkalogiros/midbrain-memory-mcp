@@ -46,7 +46,7 @@ async function coldFirstTurn({ ctx, api, client, candidate, scenarioId }) {
     if (!candidate) return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/cold-first-turn`, client, expected, blockedReason: 'A separate clean candidate install is required after an upgrade prelude.' });
     const home = path.join(ctx.dirs.run, 'cold-home-' + client.id);
     mkdirSync(home); // Existing state is an error: this case must really be cold.
-    const cold = { ...ctx, dirs: { ...ctx.dirs, home }, meta: {}, turns: [] };
+    const cold = { ...ctx, dirs: { ...ctx.dirs, home }, meta: {} };
     const project = path.join(home, 'project');
     mkdirSync(project);
     seedDetectionFixtures(cold, [client]);

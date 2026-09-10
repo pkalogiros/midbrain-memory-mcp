@@ -26,9 +26,9 @@ export default {
     const t1 = s2 ? s2.wTurn : await runTurn({ ctx, client, project, prompt: p1, scenarioId: this.id, label: 'state-old' });
     const rb1 = s2 ? s2.rb : await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
     const t2 = await runTurn({ ctx, client, project, prompt: p2, scenarioId: this.id, label: 'state-new' });
-    const rb2 = await readback(ctx, api, m, { sinceIso: since, minUser: 2, ...(ctx.options.modelChecks ? { userText: newV } : {}) });
+    const rb2 = await readback(ctx, api, m, { sinceIso: since, minUser: 2, userText: newV });
     const evidence = [relEvidence(ctx, t1.rawPath), relEvidence(ctx, t2.rawPath)];
-    if (rb2.user.length < 2 || (ctx.options.modelChecks && !rb2.user.some(r => rowText(r).includes(newV)))) {
+    if (rb2.user.length < 2 || !rb2.user.some(r => rowText(r).includes(newV))) {
       return [cell({ row: 'Freshness reconciliation', scenario: this.id, client, prompt: p3, expected, evidence, notes: `only ${rb2.user.length} of 2 state rows reached the API (${rb1.user.length} after first)`, checks: [check('both state rows reached the API', false)] })];
     }
     await grace(ctx);

@@ -1,5 +1,6 @@
 // Codex manifest + headless driver (codex exec --json …).
 import path from 'node:path';
+import { estimateUsage } from '../lib/costs.mjs';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
@@ -8,6 +9,17 @@ import { childEnv } from '../lib/context.mjs';
 import { BlockedError } from '../lib/checks.mjs';
 import { copyTree } from '../lib/evidence.mjs';
 import { approveCodexHooks } from '../lib/codex-approval.mjs';
+
+export function recordCodexOutcome(turn, event) {
+  if (event.type === 'turn.failed') turn.terminalFailure = true;
+  if (event.type === 'turn.failed' || event.type === 'error') {
+    turn.isError = true;
+    turn.errorDetail = JSON.stringify(event).slice(0, 500);
+  } else if (event.type === 'turn.completed' && !turn.terminalFailure) {
+    if (turn.isError) turn.recoveredErrors = [...(turn.recoveredErrors || []), turn.errorDetail];
+    turn.isError = false;
+  }
+}
 
 const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
 
@@ -157,8 +169,14 @@ export default {
       onStdoutLine: (line) => {
         let ev;
         try { ev = JSON.parse(line); } catch { return; }
+        recordCodexOutcome(turn, ev);
         if (ev.type === 'thread.started' && ev.thread_id) {
           turn.sessionId = ev.thread_id;
+        } else if (ev.type === 'turn.completed') {
+          turn.usage = ev.usage;
+          turn.billingMode = this.authMode;
+          turn.estimatedCost = estimateUsage(model, ev.usage, 'openai');
+          turn.costSource = '2026-09-10 standard short-context API rates';
         } else if (ev.type === 'item.completed') {
           const it = ev.item || {};
           if (it.type === 'mcp_tool_call') {

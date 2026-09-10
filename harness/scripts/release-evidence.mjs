@@ -5,7 +5,6 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fileHash } from '../lib/candidate.mjs';
-import { runExitCode } from '../lib/checks.mjs';
 import { renderMarkdown } from '../lib/report.mjs';
 import { DEFAULT_CLIENTS as ORDER, MANIFESTS } from '../clients/index.mjs';
 import { SCENARIOS } from '../scenarios/index.mjs';
@@ -85,7 +84,7 @@ export function gateProblems(results) {
   if (!results.run?.finishedAt || !Number.isFinite(Date.parse(results.run.finishedAt))) problems.push('Run is incomplete');
   if (results.run?.required !== true || results.candidate?.mode !== 'registry' || results.candidate?.registry?.published !== true) problems.push('A full required registry/upgrade run is needed');
   if (results.candidate?.dirty !== false) problems.push('Candidate source was dirty or its status is unknown');
-  if (runExitCode(results.cells || [], results.isolation?.ok === true && results.isolation?.drift?.length === 0)) problems.push('Not every cell passed with clean isolation');
+  if (!results.cells?.length || results.cells.some(c => c.status !== 'PASS') || results.isolation?.ok !== true || results.isolation?.drift?.length !== 0) problems.push('Not every cell passed with clean isolation');
   if ((results.cells || []).some(c => !c.checks?.length || c.checks.some(k => k.ok !== true))) problems.push('Missing or unsuccessful underlying checks');
   for (const id of ORDER) {
     if (!results.clients?.some(c => c.id === id && c.runnable && c.version)) problems.push(`Missing runnable client/version: ${id}`);

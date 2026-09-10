@@ -19,6 +19,10 @@ the default and required five-client matrix is unchanged. Behavioral runs use re
 models, product hooks and the MidBrain API, with controlled fixtures and a local NanoClaw
 mailbox transport. Unit tests separately mock dependencies to test harness logic.
 
+Pi support is also a product change: the published package includes its adapter,
+extension and installer detection. Only its harness selection is opt-in. Include
+Pi in the release notes and product review; it is not merely a test driver.
+
 It builds the candidate into a tarball, lets the product's own installer configure real client
 installs inside a throwaway home, drives real model sessions with fixed prompts, and scores
 what actually happened from raw evidence: rows read back from the MidBrain API, tool calls in
@@ -146,10 +150,16 @@ the same checks; it does not promise identical answers, tokens or latency on eve
    Docker, approval support, provider billing error). Failed cells are not automatically
    rerun until green. Polling retries transient reads, and NanoClaw may natively retry
    response formatting; every native reply must still be captured exactly once. See [failure handling](#missing-prerequisites-and-failure-handling) for client setup, aborts and partial results.
+
 8. **Tripwire and report.** Hash enumerated host config surfaces before and after; detected drift
-   fails the run. Render `report.md` and `results.json`. Exit 0 only when every cell is PASS
-   and isolation is clean. `--required` additionally requires registry+upgrade mode and the
+   fails the run. Render `report.md` and `results.json`. Exit 0 for a nonempty run containing only PASS or BLOCKED cells
+   with clean isolation. BLOCKED means incomplete coverage; failed checks exit 1. `--required` additionally requires registry+upgrade mode and the
    full client/scenario selection. A focused green run is only a checkpoint.
+
+HTML and Markdown findings show the affected client, requested model, test, and sweep
+round. Cross-client findings identify both clients and model pins. Explanations distinguish
+what happened from what could not be verified and give a next step. Live scenario failures
+use the same explanations; saved console logs remain an unchanged record of their run.
 
 Ordinary runs default to one worker; `--concurrency 1–5` overlaps only scenarios
 marked parallel-safe. Cold capture, upgrade and client-specific cases remain serial.
@@ -228,7 +238,8 @@ an old report validate the new source SHA.
 | `harness/lib/evidence.mjs` | Copies transcripts and logs, counts cache/spool files, hashes config shape for the report. |
 | `harness/lib/tripwire.mjs` | Real-home isolation: snapshot and diff of the host's config surfaces, reusing the Vitest tripwire list. |
 | `harness/lib/proc.mjs` | Spawn with hard timeout, stdin, NDJSON line capture. |
-| `harness/lib/report.mjs` | Renders the side-by-side matrix and per-cell detail to Markdown; defines the row order. |
+| `harness/lib/report.mjs`, `harness/lib/report-html.mjs` | Markdown and standalone HTML summaries: status, scope, matrix, models and failed checks. HTML embeds no raw transcripts or test homes. |
+| `harness/lib/costs.mjs`, `harness/lib/saved-reports.mjs` | Aggregate reported USD, API estimates and ChatGPT API-equivalents with coverage counts; regenerate reports from saved evidence without model calls or changing original verdict JSON. |
 | `harness/lib/codex-approval.mjs` | Validates the three installed hooks through Codex, invokes native approval, then verifies unchanged hashes and persisted trust in a fresh process. |
 | `harness/lib/codex-approval-pty.py` | Python standard-library terminal driver for the pinned Codex hook browser; bounded timeout and child cleanup. |
 | `harness/scripts/release-evidence.mjs` | Exports selected redacted evidence and verifies the required gate against a source SHA and exact archive. |
@@ -498,6 +509,7 @@ and, in required mode, recalls it in a new process with MCP enabled.
   logs/                        product hook and server logs at debug level
   evidence/<client>/<scenario>/ raw stream, normalised turn, prompt, API read-back
   results.json, report.md      every cell with checks and evidence paths; the matrix
+  report.html                  human-readable offline summary with failures and coverage
   isolation.json               real-home tripwire diff
   registry/, nanoclaw.json     loopback registry state; NanoClaw image and source identity
 ```
@@ -687,7 +699,7 @@ the tested configuration and requires new evidence.
 These are historical observations from local runs, not all-inclusive budgets. Wall-clock
 figures come from completed run metadata; spend is approximate, as recorded in the
 [historical review](review-2026-09-09.md#cost-and-model-choice). Claude/OpenCode expose cost
-fields, NanoClaw estimates use transcript usage, and Hermes accounting is incomplete.
+fields, NanoClaw estimates use transcript usage, and older Hermes accounting was incomplete.
 Codex costs, runner charges and backend costs are excluded from the Anthropic figures.
 The historical Codex runs used a ChatGPT login; the workflow uses separately billed OpenAI API auth.
 
@@ -706,6 +718,70 @@ Fixed indexing/readback waits, container startup, tool output, model latency, co
 native retries all affect the total. A prompt can trigger several provider calls, so neither
 prompt count nor the number of result cells is a reliable bill by itself.
 
+### Latest recorded costs
+
+The new four-client/two-round sweep `20260910-135656-d7cc` took **22m 46s**
+with four workers: **87 PASS / 17 FAIL / 16 BLOCKED**. Both real-home isolation checks
+passed. Of 48 planned prompts, 40 were attempted and 38 returned turn records;
+API readback failures prevented the eight final freshness questions. This is a failed
+model-check run, not release sign-off or a passing speed benchmark.
+
+| Client | Reported USD | Estimated USD | ChatGPT API-equivalent USD | Accounting |
+|---|---|---|---|---|
+| claude | $0.248139 | $0.079174 | $0.000000 | 10/10 attempts; 2 interrupted estimates may omit auxiliary usage |
+| codex | $0.000000 | $0.000000 | $0.609012 | 10/10 attempts |
+| hermes | $0.000000 | $0.698991 | $0.000000 | 10/10 attempts |
+| nanoclaw | $0.000000 | $0.449287 | $0.000000 | 8/10 attempts; Docker launch failures have no model usage record |
+
+**Available API subtotal: $1.475591** ($0.248139 reported + $1.227451 estimated). Codex adds **$0.609012 API-equivalent**, recorded separately because this run used ChatGPT authentication.
+
+This is not a complete invoice: two NanoClaw launch attempts have no usage record,
+and two interrupted Claude estimates may omit unreported auxiliary work. All 38
+returned turn records have either reported costs, estimates or plan equivalents.
+Runner and MidBrain backend costs remain unmetered. The early host load exceeded 180;
+the run also recorded Docker launch failures, native hook timeouts, a Codex TLS
+reconnection error, two five-minute Claude timeouts and API readback failures.
+These observed conditions limit the timing comparison; no failures were erased.
+
+| Round | Available API subtotal | Codex API-equivalent | Time |
+|---|---|---|---|
+| fast | $0.385836 | $0.293879 | 22m 29s |
+| sonnet | $1.089755 | $0.315133 | 22m 46s |
+
+`costs.json` and the refreshed Markdown/HTML reports contain the reconciled accounting.
+The original `results.json` and `sweep.json` are retained unchanged; their cost fields
+predate recovery of interrupted Claude usage and inclusion of failed launch attempts.
+Regenerating reports reads the saved native usage and updates `costs.json` without model calls.
+
+The earlier 11m 36s sweep `20260910-101821-a704` remains historical evidence:
+113 PASS / 7 FAIL and only $0.42764350 of Claude costs recorded. Its subtotal is
+not comparable to this fuller four-client accounting. Neither run proves a passing
+15-minute sweep. Parallelism alone does not guarantee lower provider spend.
+
+### How cost accounting works
+
+Returned model turns keep native usage and a cost source. Failed launches remain visible in the attempt count. Claude supplies its CLI
+`total_cost_usd`; interrupted Claude turns fall back to deduplicated assistant usage and are marked incomplete. Hermes supplies session-database usage and reported/estimated cost
+(resumed sessions use the before/after difference). NanoClaw estimates from every native
+assistant request, including tool calls and retries, deduplicated by message ID. Its cache
+writes use the native 5-minute/1-hour breakdown when available.
+
+Codex records `turn.completed.usage`. With a ChatGPT login, tokens consume plan usage;
+there is no per-turn subscription invoice. The report therefore separates its **API-equivalent**
+from API spend. These runs use standard short-context `gpt-5.6-sol` rates checked
+2026-09-10: $4 input, $0.40 cached input, $5 cache write and $20 output per million tokens.
+Fast mode and long-context pricing are outside that estimate. Unknown models or missing
+usage remain unrecorded, never silently zero.
+[OpenAI API pricing](https://developers.openai.com/api/docs/pricing),
+[Codex plan billing](https://learn.chatgpt.com/docs/pricing).
+
+`run.costs`, per-round `costs` and whole-sweep `costs` separate `reportedUsd`,
+`estimatedUsd` and `planEquivalentUsd`, with attempt counts, interrupted-estimate counts and per-client coverage. The HTML distinguishes prompt attempts from returned turn records.
+These are model accounting records, not a reconciled provider invoice. Runner electricity,
+VM charges and MidBrain backend inference/storage are not metered by this harness and
+remain excluded. Parallelism reduces elapsed time; prompt reuse reduces model work,
+but neither guarantees proportional dollar savings.
+
 ### Model prices and planning estimates
 
 Anthropic's standard Claude API rates, checked 2026-09-10, are below in USD per million
@@ -714,6 +790,7 @@ tokens. [Official pricing](https://platform.claude.com/docs/en/about-claude/pric
 | Model | Uncached input | 5-minute cache write | 1-hour cache write | Cache read | Output |
 |---|---|---|---|---|---|
 | Haiku 4.5 | $1 | $1.25 | $2 | $0.10 | $5 |
+| Sonnet 4.5 (sweep) | $3 | $3.75 | $6 | $0.30 | $15 |
 | Sonnet 5 | $2 | $2.50 | $4 | $0.20 | $10 |
 
 **Illustrative estimate:** holding token counts and cache categories constant, Sonnet 5 costs
@@ -771,9 +848,6 @@ round, not a request to enumerate every Cartesian combination:
 ```bash
 # Four total workers: the configuration measured at 11m 36s
 node harness/run.mjs sweep --model-checks --models models.json --parallel-runs 2 --concurrency 4
-
-# Eight total workers: implemented and tested; live timing still unverified
-node harness/run.mjs sweep --model-checks --models models.json --parallel-runs 2 --concurrency 8
 ```
 
 A sweep defaults to four total workers and one active round. `--concurrency` accepts
@@ -782,10 +856,21 @@ The total budget is divided across active rounds, rounded down. With two rounds 
 eight workers, each isolated home gets four. Once S1 checkpoints are complete,
 model-check S2 jobs lock only the reader, letting all four reads overlap. Other pair
 jobs retain both client locks. Cold capture and infrastructure ordering are unchanged.
-More workers can encounter provider limits or host contention; eight workers have no
-proven timing advantage yet. The default remains four.
+Use four total workers for shipping runs. Budgets above five remain experimental
+and are not recommended until validated. The earlier eight-worker probe returned
+HTTP 401 before client homes were populated: it used the harness key directly, so
+this is authentication failure, not evidence of load or home key propagation. Runs
+now check API access before candidate build and registry setup; readback stops on
+HTTP 401/403 as BLOCKED. The default remains four.
 
-The sweep writes `sweeps/<id>/sweep.json` and `report.md`, with per-round reports under
+NanoClaw receives a delivery-format instruction: put the requested answer inside
+its native `<message to="harness">...</message>` wrapper. This avoids extra formatting
+turns while keeping exact-answer and capture checks unchanged. The formatted prompt
+is recorded before launch. Native hook timeouts appear as console warnings and
+`hookFailures` in turn JSON. Separate cold-home probes count toward prompts and
+reported native costs.
+
+The sweep writes `sweeps/<id>/sweep.json`, `report.md` and `report.html`, with per-round reports under
 `<round>/runs/<id>/`. They record wall time, model selections, worker budgets, prompt
 counts and failures. A failed or incomplete round fails the sweep; other rounds still
 finish. SIGINT/SIGTERM cancel active rounds and invoke registry/container cleanup.
@@ -807,7 +892,7 @@ Failed or missing baseline checks stop follow-up execution before model prompts.
 
 ```bash
 node harness/run.mjs run --follow-up /absolute/path/to/baseline-run --concurrency 4 --keep
-node harness/run.mjs sweep --follow-up /absolute/path/to/baseline-run --models models.json --parallel-runs 2 --concurrency 8
+node harness/run.mjs sweep --follow-up /absolute/path/to/baseline-run --models models.json --parallel-runs 2 --concurrency 4
 ```
 
 Follow-ups run the same six-prompt profile, retain infrastructure checks as explicitly
@@ -905,12 +990,12 @@ flowchart LR
     O["OpenCode"] --> C["Claude"] --> X["Codex"] --> H["Hermes"] --> N["NanoClaw"] --> O
 ```
 
-With five clients, simple runs five writer/reader pairs and ten S2 prompts. Full mode runs
+With five clients, Simple runs five writer/reader pairs and five new S2 reader prompts; the writer checkpoint comes from S1. Full mode runs
 twenty ordered pairs with five shared writes and twenty reads, twenty-five S2 prompts. The
-fifteen-prompt saving applies to S2, not the whole run or bill. In upgrade mode S1 also
+twenty-prompt saving applies to S2, not the whole run or bill. In upgrade mode S1 also
 scores the prelude's post-upgrade capture instead of repeating it, Claude's hook-ordering case
 is derived from S1, S4 reuses S1's global write, and in simple mode S3 is scored on the
-prelude's write-then-fresh-recall pair. Simple mode also leaves two required-only checks to `--required` (S4's recall from a directory that never saw the installer, and Codex persisted hook approval) and reuses three more turns: S5 builds on the client's own S2 checkpoint as the stale state, OpenCode's plugin-only case stops at the verified capture, and Hermes' accepted-hooks half is S1's capture. A full upgrade matrix is 106 prompts rather than 132; a simple run is 67 rather than 102. Every reused or trimmed cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
+prelude's write-then-fresh-recall pair. Simple mode also leaves two required-only checks to `--required` (S4's recall from a directory that never saw the installer, and Codex persisted hook approval) and reuses three more turns: S5 builds on the client's own S2 checkpoint as the stale state, OpenCode's plugin-only case stops at the verified capture, and Hermes' accepted-hooks half is S1's capture. A full upgrade matrix is 107 planned prompts; a Simple run now plans 58 rather than 68 (both include Claude’s cold-home probe), for five clients with upgrades. S1’s hidden-value/literal checkpoint also supplies S2 and S8. Without upgrades, S3 reuses it too. That removes two prompts per client with upgrades, three without, while retaining the capture, literal, own-recall, foreign-recall and freshness assertions. For Claude/Codex/Hermes/NanoClaw, Simple with upgrades plans 47 prompts instead of 55. Blocked prerequisites and client selection can change actual counts. Every reused or trimmed cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
 clients. Unavailable clients keep their place in a simple cycle, and affected links are
 BLOCKED. The planned links are recorded in `run.crossClientPairs`.
 
@@ -978,7 +1063,7 @@ disable it, rather than writing `--simple=false`).
 | `freeze` | Build/package/extract the candidate and print its identity; optional `--mode`, default `dev`. Does not start a registry or run scenarios. |
 | `run` | Execute selected clients/scenarios, using the flags below. |
 | `sweep` | Explicit model rounds from `--models FILE`; requires `--model-checks` or `--follow-up RUN`. Supports `--parallel-runs`, total `--concurrency`, and `--root`. |
-| `report <runDir>` | Regenerate `report.md` from completed `results.json`; no model calls. |
+| `report <runDir\|sweepDir>` | Regenerate offline HTML summaries from saved results; individual run Markdown is refreshed too. No model calls; original result JSON stays unchanged. |
 | `help` | Show command usage, client IDs and scenario IDs. |
 
 | Run flag | Default | Meaning / constraints |
@@ -997,7 +1082,7 @@ disable it, rather than writing `--simple=false`).
 | `--approve-codex-hooks` | Automatic | Compatibility flag; native approval already runs for the Codex S10 case. Pinned client and Python 3 required. |
 | `--interactive` | Off | Replace automatic native S10 approval with manual terminal approval; requires a TTY. |
 | `--root /absolute/path` | `MIDBRAIN_HARNESS_ROOT`, otherwise `~/.midbrain-harness` | Parent of `runs/<run-id>`; must be outside temporary directories. |
-| `--readback-timeout-ms 90000` | Env override, otherwise `90000` | Maximum capture readback wait; env: `MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS`. |
+| `--readback-timeout-ms 180000` | Env override, otherwise `180000` | Capture verification polling budget; each API request allows 60 seconds and an in-flight request may finish beyond the polling budget. Stops early when verified; env: `MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS`. |
 | `--index-grace-ms 20000` | Env override, otherwise `20000` | Indexing delay before recall where used; env: `MIDBRAIN_HARNESS_INDEX_GRACE_MS`. |
 | `--poll-interval-ms 5000` | `5000` | Readback polling interval; supported in code though omitted from the compact CLI help. |
 | `--keep` | Off; no behavioral effect | Currently parsed but not used. Local run directories are retained regardless; containers/registry still undergo normal cleanup. |
@@ -1009,6 +1094,36 @@ are also environment settings, as documented above. The CLI currently does not r
 unknown option; use the supported names rather than assuming an extra flag took effect.
 
 ## How to read and parse results
+
+### HTML results and live supervision
+
+Every completed run and sweep writes **`report.html`** beside its JSON/Markdown results.
+Open the file directly in a browser: styles are embedded and it works offline. It shows
+elapsed time, prompt counts, models, per-client cost accounting and coverage, failed checks and the run
+coverage matrix. Scope remains explicit: a model-check summary is not release sign-off.
+The summary embeds no raw transcripts or credential-bearing homes; full local evidence
+remains in the run directory. For existing results:
+
+```bash
+node harness/run.mjs report /absolute/path/to/run-or-sweep-directory
+```
+
+Normal runs log setup, scenario starts/results, each model turn's start/end and a status
+heartbeat every 30 seconds. Sweeps stream these lines immediately, prefixed with the round
+name, and append the full child stderr to each round's `runner.log` while it runs. Progress
+uses stderr; final report paths use stdout. To supervise and save both streams in Bash:
+
+```bash
+set -o pipefail
+node harness/run.mjs sweep --model-checks --models models.json --parallel-runs 2 --concurrency 4 2>&1 | tee sweep-console.log
+```
+
+Press **Ctrl+C** to cancel. The runner stops active child process groups on macOS/Linux,
+prevents new subprocesses, cancels queued rounds and runs registry/container cleanup.
+A round gets up to 30 seconds for cleanup before forced termination; native client
+subprocesses get a 5-second termination grace. A cancelled/incomplete round is not a
+pass. Provider work already sent may still be charged. Closing the host abruptly or
+force-killing the supervisor can prevent normal cleanup.
 
 ### Start with the verdict and identity
 
@@ -1036,8 +1151,8 @@ The run prints the path to `report.md`. Open it, then check:
 | SKIP / FLAKY | Supported report statuses, both non-passing for the run gate. There is no automatic flaky-test detection or rerun scheduler. |
 | — | No cell for that row/client in this run; no coverage claim. |
 
-The run exits **0 only for a nonempty set of all-PASS cells with clean isolation**. Non-PASS
-cells exit 1; handled interruptions have signal exit codes. A focused/simple run can exit 0
+The run exits **0 for a nonempty set of PASS or BLOCKED cells with clean isolation**.
+BLOCKED means incomplete coverage and does not fail the run. FAIL, FLAKY, SKIP, empty results or isolation drift exit 1; handled interruptions have signal exit codes. A focused/simple run can exit 0
 without satisfying release coverage. Preserve the command's failure status in scripts; do
 not turn failures into success with `|| true` or an unchecked pipe to `tail`.
 
@@ -1458,17 +1573,25 @@ This is a dated checkpoint, not a live status dashboard:
 
 | Area | Implemented | Recorded validation as of 2026-09-10 |
 |---|---|---|
-| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,357 tests passed, 3 skipped, plus 232 copied-topology isolation checks. |
-| Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Approval driver checked in six fresh macOS homes without model calls; earlier opt-in full check passed 1,324 tests plus 224 isolation checks. Linux remains unvalidated. |
+| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,363 tests passed, 3 skipped, plus 232 copied-topology isolation checks. |
+| Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Fresh run `20260910-130445-1639` passed native before/after approval, self-repair, capture and Codex upgrade checks on macOS. Linux remains unvalidated. |
 | Five-client behavioral matrix | All adapters and scenarios described above | Completed broad run `20260909-083452-4fdd`: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate `6d6fc58`; `required: false`. It predates approval automation and simple mode. |
 | Simple cycle | Pair selection, labels, reports, export/CI support | Run `20260910-082009-e52c`: 33m 52s at concurrency 3, 87 PASS / 7 FAIL, real-home isolation passed. |
 | Self-contained NanoClaw runtime | Local image preparation, embedded runner/assets/license, manifest and hash verification | Unit-tested; the local build attempt was blocked by an unreachable Docker daemon. No prepared-image behavioral run is validated. |
 | Release evidence | Selected redacted export and strict candidate verification | Export/verifier tests; no complete green required evidence for the intended current candidate. |
-| Pi (opt-in) | Native capture extension, MCP bridge, session driver | Standalone run `20260910-091532-e1d4`: 10 PASS; Pi/Claude run `20260910-091950-9fc3`: 20 PASS, including two-way recall; real homes unchanged. |
-| Model-check sweep | Six-prompt profile, two concurrent rounds, strict optional baseline reuse | 11m 36s at four workers, 113 PASS / 7 FAIL; infrastructure unverified. Eight-worker attempt blocked by API HTTP 401 before prompts. |
+| Pi (harness opt-in; product integration ships) | Native capture extension, MCP bridge, session driver | Fresh run `20260910-132050-ce74`: 10 PASS in 1m 09s, four prompts, native capture and fresh-session recall. Earlier Pi/Claude run `20260910-091950-9fc3`: 20 PASS including two-way recall. Clean isolation. |
+| NanoClaw capture and lifecycle | Native delivery wrapper, cold wake, resume and legacy opener recovery | Fresh run `20260910-132046-7f06`: 10 PASS in 2m 18s, four prompts, clean isolation. No native hook timeouts in this run. |
+| Targeted upgrade refresh | Claude, Codex and Hermes S1/S9/S10 | `20260910-130445-1639`: 28 PASS / 2 FAIL. All three current-candidate capture checks passed; Codex and Hermes upgrades passed. Remaining failures: Claude previous-release assistant capture and an API HTTP 401 during Hermes accepted-hook capture. This predates the cold-home prompt-count correction. |
+| Model-check sweep | Six-prompt profile, two concurrent rounds, strict optional baseline reuse | Latest cost-validation sweep: 22m 46s, 87 PASS / 17 FAIL / 16 BLOCKED, clean isolation; host contention, Docker/hook/API timeouts. Available API subtotal $1.475591 plus $0.609012 Codex API-equivalent, with explicit accounting gaps. Earlier sweep: 11m 36s, 113 PASS / 7 FAIL. Infrastructure unverified. |
 | Manual GitHub workflow | Suite/model inputs, setup, execution, artifacts, cleanup | Built and statically checked; not deployed or run on a cloud runner. Slack alerts are not built. |
 
-Before calling the pipeline release-ready, triage those failures, validate Linux execution,
+Historical failures are retained as evidence, not asserted as current regressions. The
+fresh targeted runs above replace older evidence only for the paths they exercise.
+Hermes 0.19.0 records shim modification time for display; execution approval checks
+the event and command. The observed failed user hook did execute and received HTTP
+401, so modification-time invalidation does not explain that failure.
+
+Before calling the full pipeline release-ready, resolve remaining environment failures, validate Linux execution,
 and obtain a complete passing required report on the intended candidate plus programmatic
 CI and Radu's review. Exact equivalence with the maintainer's separate manual checklist
 remains unconfirmed. Cloud activation, Slack alerts, broader OS/client behavioral coverage,

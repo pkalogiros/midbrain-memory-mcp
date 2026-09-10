@@ -10,7 +10,7 @@ export default {
   parity: true,
   rows: ['Marker and prompt robustness'],
   async run({ ctx, api, client, project }) {
-    const seed = ctx.options.modelChecks ? ctx.meta.s02Writes?.[client.id] : null;
+    const seed = ctx.options.simple ? ctx.meta.s02Writes?.[client.id] : null;
     const m = seed?.m || `${ctx.subMarker(client.id, 'literal')}-LITERAL`;
     const literal = `<!-- mb:ctx-start --> midbrain-memory-rules:start ${m}`;
     const prompt = `Echo the following line back exactly as written, then say "done": ${literal}`;
@@ -23,7 +23,7 @@ export default {
     const userRow = rb.user[0];
     const userText = userRow ? rowText(userRow) : '';
     return [cell({ row: 'Marker and prompt robustness', scenario: this.id, client, prompt: t.prompt, expected, evidence: [relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath), relEvidence(ctx, readbackPath)],
-      notes: `${seed ? 'Follow-up: literal echo scored on this run’s capture checkpoint; ' : ''}read-back rows=${rb.rows.length} in ${rb.elapsedMs} ms`,
+      notes: `${seed ? 'Checkpoint reuse: literal echo scored on this run’s capture checkpoint; ' : ''}read-back rows=${rb.rows.length} in ${rb.elapsedMs} ms`,
       checks: [
         ...turnChecks(t),
         check('answer contains the mb:ctx-start token intact', t.finalText.includes('<!-- mb:ctx-start -->')),

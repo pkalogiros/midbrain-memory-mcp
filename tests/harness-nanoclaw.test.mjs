@@ -37,6 +37,12 @@ describe('NanoClaw evidence', () => {
     expect(parseTranscript([user, answer].map(JSON.stringify).join('\n'), 'prompt').providerError).toBeNull();
     expect(parseTranscript([user, failure, answer].map(JSON.stringify).join('\n'), 'prompt').providerError).toBeNull();
   });
+  it('reports current-turn native hook timeouts without exposing hook commands', () => {
+    const timeout = { type: 'attachment', attachment: { type: 'hook_cancelled', hookEvent: 'Stop', timedOut: true, timeoutMs: 30000, command: 'private command' } };
+    const user = { type: 'user', message: { content: 'prompt' } };
+    expect(parseTranscript([timeout, user].map(JSON.stringify).join('\n'), 'prompt').hookFailures).toEqual([]);
+    expect(parseTranscript([user, timeout].map(JSON.stringify).join('\n'), 'prompt').hookFailures).toEqual(['Stop hook timed out after 30 s']);
+  });
   it('accepts only the actual container cwd when declared', () => {
     const rows = [{ memory_metadata: { client: 'nanoclaw', cwd: '/workspace/agent', session_id: 'sdk' } }];
     expect(metadataChecks(rows, 'nanoclaw', '/workspace/agent').every(c => c.ok)).toBe(true);
@@ -92,8 +98,10 @@ describe('NanoClaw isolation', () => {
     const env = dockerEnv({ PATH: '/bin', HOME: '/host', DOCKER_HOST: 'unix:///docker.sock', ANTHROPIC_API_KEY: 'secret', MIDBRAIN_API_KEY: 'secret' });
     expect(env).toEqual({ PATH: '/bin', HOME: '/host', DOCKER_HOST: 'unix:///docker.sock' });
   });
-  it('blocked required cells cannot return success', () => {
-    expect(runExitCode([{ status: 'PASS' }, { status: 'BLOCKED' }], true)).toBe(1);
+  it('blocked checks do not fail a run, while failures and isolation violations do', () => {
+    expect(runExitCode([{ status: 'PASS' }, { status: 'BLOCKED' }], true)).toBe(0);
+    expect(runExitCode([{ status: 'BLOCKED' }], true)).toBe(0);
+    expect(runExitCode([{ status: 'FAIL' }, { status: 'BLOCKED' }], true)).toBe(1);
     expect(runExitCode([], true)).toBe(1);
     expect(runExitCode([{ status: 'PASS' }, { status: 'SKIP' }], true)).toBe(1);
     expect(runExitCode([{ status: 'PASS' }], true)).toBe(0);

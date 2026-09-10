@@ -30,6 +30,7 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
     const since = sinceNow();
     const t = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: checkpoint ${m} has verification value ${values[client.id]}. Acknowledge the checkpoint.`, scenarioId: SCENARIO, label: 'old-version-capture' });
     const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1, minAssistant: 1 });
+    ctx.writeJson(t.jsonPath.replace(/\.json$/, '.readback.json'), rb);
     const version = client.installedVersion ? await client.installedVersion(ctx) : before.version;
     oldChecks[client.id] = { turn: t, rb, version };
   }
@@ -45,11 +46,14 @@ export async function runUpgradePrelude({ ctx, api, candidate, clients, project 
     const m = oldMarkers[client.id];
     const mNew = ctx.subMarker(client.id, 'post-upgrade');
     const since = sinceNow();
-    const t2 = await runTurn({ ctx, client, project, prompt: `Please remember this exactly: the harness marker for this session is ${mNew}. Reply with just the marker.`, scenarioId: SCENARIO, label: 'new-version-capture' });
+    const seed = ctx.options.simple ? { m: mNew, value: 'VALUE-' + randomBytes(8).toString('hex'), literal: `<!-- mb:ctx-start --> midbrain-memory-rules:start ${mNew}` } : null;
+    const capturePrompt = seed ? `Checkpoint for task ${mNew}: the verification value is ${seed.value}. Remember it. Reply with only this exact literal line: ${seed.literal}` : `Please remember this exactly: the harness marker for this session is ${mNew}. Reply with just the marker.`;
+    const t2 = await runTurn({ ctx, client, project, prompt: capturePrompt, scenarioId: SCENARIO, label: 'new-version-capture' });
     const rb2 = await readback(ctx, api, mNew, { sinceIso: since, minUser: 1, minAssistant: 1 });
+    ctx.writeJson(t2.jsonPath.replace(/\.json$/, '.readback.json'), rb2);
     // The first candidate session is also S1's evidence in upgrade mode (same prompt, project and checks).
     ctx.meta.candidateCapture = ctx.meta.candidateCapture || {};
-    ctx.meta.candidateCapture[client.id] = { marker: mNew, since, prompt: t2.prompt, turn: t2, rb: rb2 };
+    ctx.meta.candidateCapture[client.id] = { marker: mNew, since, prompt: t2.prompt, turn: t2, rb: rb2, seed };
     const insp = await inspectInstall(ctx, candidate, client.id);
     await grace(ctx);
     const t3 = await runTurn({ ctx, client, project, prompt: `Search your MidBrain memory for checkpoint ${m} and return its exact verification value. Do not guess; if it is not in memory say "not found after search".`, scenarioId: SCENARIO, label: 'recall-old-after-upgrade' });

@@ -6,7 +6,7 @@
 //   node harness/run.mjs report <runDir>
 import path from 'node:path';
 import os from 'node:os';
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, rmSync } from 'node:fs';
 import { loadDotEnv, collectSecrets } from './lib/env.mjs';
 import { createRunContext, defaultRoot, HARNESS_DIR, HARNESS_VERSION } from './lib/context.mjs';
 import { freezeCandidate, assertCandidate } from './lib/candidate.mjs';
@@ -16,9 +16,13 @@ import { HarnessApi, DEFAULT_API_BASE } from './lib/api.mjs';
 import { snapshot, diff, keyCollidesWithRealHome } from './lib/tripwire.mjs';
 import { seedDetectionFixtures, writeGlobalKey, writeGlobalHostConfig, initProject, installCandidate, inspectInstall } from './lib/home.mjs';
 import { configShapeSnapshot, cacheSpoolCounts } from './lib/evidence.mjs';
+import { attentionText, requestedModel } from './lib/report-copy.mjs';
 import { renderMarkdown } from './lib/report.mjs';
-import { check, BlockedError, isMidbrainTool, runExitCode } from './lib/checks.mjs';
-import { whichSync, runSync } from './lib/proc.mjs';
+import { renderRunHtml } from './lib/report-html.mjs';
+import { withFailureContext } from './lib/saved-reports.mjs';
+import { recordedCosts } from './lib/costs.mjs';
+import { check, BlockedError, isMidbrainTool, runExitCode, runOutcome } from './lib/checks.mjs';
+import { whichSync, runSync, stopChildProcesses } from './lib/proc.mjs';
 import { cell, blockedCells } from './scenarios/_shared.mjs';
 import { prepareRegistry } from './lib/registry.mjs';
 import { runUpgradePrelude } from './lib/upgrade.mjs';
@@ -124,19 +128,29 @@ async function doctor(flags) {
 // ---------------------------------------------------------------------------
 async function runScenario(sc, args, cells, creditClient) {
   const started = Date.now();
-  const who = args.client ? args.client.id : `${args.writer.id}→${args.reader.id}`;
-  log(`▶ ${sc.id} [${who}]`);
+  const label = client => `${client.displayName || client.id} (${requestedModel(client)})`;
+  const who = args.client ? label(args.client) : `${label(args.writer)} → ${label(args.reader)}`;
+  const explain = out => {
+    if (!out.some(c => ['FAIL', 'BLOCKED', 'FLAKY'].includes(c.status))) return;
+    const clients = [args.client, args.writer, args.reader].filter(Boolean);
+    const report = { run: { runDir: args.ctx.dirs.run, models: Object.fromEntries(clients.map(c => [c.id, requestedModel(c)])) }, cells: out };
+    for (const line of attentionText(withFailureContext(report).cells).split('\n')) if (line) log(line);
+  };
+  log(`Starting ${sc.title || sc.id} [${who}]`);
   try {
     const out = await sc.run(args);
     for (const c of out) { c.durationMs = Date.now() - started; cells.push(c); }
-    log(`  ${sc.id} [${who}] → ${out.map((c) => `${c.row}=${c.status}`).join(', ')} (${Math.round((Date.now() - started) / 1000)} s)`);
+    log(`  ${sc.title || sc.id} [${who}] → ${out.map((c) => `${c.row}=${c.status}`).join(', ')} (${Math.round((Date.now() - started) / 1000)} s)`);
+    explain(out);
   } catch (e) {
     if (e && e.blocked) {
-      cells.push(...blockedCells(sc.rows, sc.id, creditClient, e.message));
-      log(`  ${sc.id} [${who}] → BLOCKED: ${e.message}`);
+      const out = blockedCells(sc.rows, sc.id, creditClient, e.message);
+      cells.push(...out);
+      explain(out);
+      log(`  ${sc.title || sc.id} [${who}] → BLOCKED: ${e.message}`);
     } else {
       cells.push(...sc.rows.map((row) => cell({ row, scenario: sc.id, client: creditClient, checks: [check('scenario completed without harness error', false, (e && e.stack ? e.stack : String(e)).slice(0, 800))] })));
-      log(`  ${sc.id} [${who}] → harness error: ${e && e.message ? e.message : e}`);
+      log(`  ${sc.title || sc.id} [${who}] → harness error: ${e && e.message ? e.message : e}`);
     }
   }
 }
@@ -165,7 +179,7 @@ async function run(flags) {
   const ctx = createRunContext({
     root,
     options: {
-      readbackTimeoutMs: num(flags['readback-timeout-ms'], num(process.env.MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS, 90000)),
+      readbackTimeoutMs: num(flags['readback-timeout-ms'], num(process.env.MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS, 180000)),
       indexGraceMs: num(flags['index-grace-ms'], num(process.env.MIDBRAIN_HARNESS_INDEX_GRACE_MS, 20000)),
       pollIntervalMs: num(flags['poll-interval-ms'], 5000),
       keep: Boolean(flags.keep),
@@ -178,6 +192,7 @@ async function run(flags) {
     },
   });
   ctx.secrets = secrets;
+  ctx.log = log;
   ctx.cleanup = [];
   let cleanupPromise;
   const cleanupRun = () => cleanupPromise ||= (async () => {
@@ -187,6 +202,8 @@ async function run(flags) {
     if (failure) throw failure.reason;
   })();
   const interrupted = async signal => {
+    log(`${signal}: stopping active client processes and cleaning up …`);
+    await stopChildProcesses();
     try { await cleanupRun(); } catch (e) { log(`cleanup failed: ${e.message}`); }
     process.exit(signal === 'SIGINT' ? 130 : 143);
   };
@@ -194,7 +211,12 @@ async function run(flags) {
   const onTerm = () => interrupted('SIGTERM');
   process.once('SIGINT', onInt);
   process.once('SIGTERM', onTerm);
+  const heartbeat = globalThis.setInterval(() => log(`still running · ${Math.round((Date.now() - Date.parse(ctx.startedAt)) / 1000)} s elapsed · ${ctx.turns.length} completed prompts · Ctrl+C to stop`), 30000);
   try {
+  const api = new HarnessApi({ baseUrl: apiBaseUrl(), key });
+  log('checking MidBrain API access before candidate build and client setup …');
+  const probe = await api.probe();
+  if (!probe.ok) throw new Error(`MidBrain API probe failed: ${apiBaseUrl()} HTTP ${probe.status} ${probe.error || ''}`);
   const candidate = await freezeCandidate({ mode, directory: path.join(ctx.dirs.run, 'candidate') });
   ctx.candidate = candidate;
   const manifests = selectManifests(list(flags.clients));
@@ -217,9 +239,6 @@ async function run(flags) {
   const before = snapshot();
   ctx.writeJson(path.join(ctx.dirs.run, 'isolation-before.json'), before);
 
-  const api = new HarnessApi({ baseUrl: apiBaseUrl(), key });
-  const probe = await api.probe();
-  if (!probe.ok) throw new Error(`MidBrain API probe failed: ${apiBaseUrl()} HTTP ${probe.status} ${probe.error || ''}`);
   writeGlobalHostConfig(ctx, (process.env.MIDBRAIN_HARNESS_API_URL || '').trim() || null);
 
   const clientStates = [];
@@ -383,6 +402,7 @@ async function run(flags) {
       followup,
       modelChecks: ctx.options.modelChecks,
       promptCount: ctx.turns.length,
+      costs: recordedCosts(ctx.dirs.run),
       promptsByClient: Object.fromEntries(manifests.map(m => [m.id, ctx.turns.filter(t => t.client === m.id).length])),
       toolPins: Object.fromEntries(manifests.map(m => [m.id, m.install.version || null])),
       captureSettings: { pk: process.env.MIDBRAIN_HARNESS_PK === '1' },
@@ -398,16 +418,21 @@ async function run(flags) {
     isolation: { ok: drift.length === 0, drift },
   };
   ctx.writeJson(path.join(ctx.dirs.run, 'results.json'), results);
-  writeFileSync(path.join(ctx.dirs.run, 'report.md'), renderMarkdown(results));
+  ctx.writeJson(path.join(ctx.dirs.run, 'costs.json'), results.run.costs);
+  writeFileSync(path.join(ctx.dirs.run, 'report.md'), renderMarkdown(withFailureContext(results)));
+  writeFileSync(path.join(ctx.dirs.run, 'report.html'), renderRunHtml(withFailureContext(results)));
   if (existsSync(path.join(ctx.dirs.run, 'results.partial.json'))) rmSync(path.join(ctx.dirs.run, 'results.partial.json'));
 
   const counts = {};
   for (const c of cells) counts[c.status] = (counts[c.status] || 0) + 1;
-  log(`done: ${Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(' ')} · isolation ${drift.length ? `DRIFT(${drift.length})` : 'ok'}`);
+  log(`Finished · ${runOutcome(cells, drift.length === 0)}${counts.BLOCKED ? ' · incomplete coverage' : ''}: ${Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(' ')} · isolation ${drift.length ? `DRIFT(${drift.length})` : 'ok'}`);
+  for (const line of attentionText(withFailureContext(results).cells).split('\n')) if (line) log(line);
   log(`report: ${path.join(ctx.dirs.run, 'report.md')}`);
+  log(`HTML results: ${path.join(ctx.dirs.run, 'report.html')}`);
   console.log(path.join(ctx.dirs.run, 'report.md'));
   process.exitCode = runExitCode(cells, drift.length === 0);
   } finally {
+    globalThis.clearInterval(heartbeat);
     process.removeListener('SIGINT', onInt);
     process.removeListener('SIGTERM', onTerm);
     await cleanupRun();
@@ -417,13 +442,11 @@ async function run(flags) {
 // ---------------------------------------------------------------------------
 // report / freeze / help
 // ---------------------------------------------------------------------------
-function report(flags) {
+async function report(flags) {
   const dir = flags._[0];
   if (!dir) throw new Error('usage: report <runDir>');
-  const results = JSON.parse(readFileSync(path.join(dir, 'results.json'), 'utf8'));
-  const out = path.join(dir, 'report.md');
-  writeFileSync(out, renderMarkdown(results));
-  console.log(out);
+  const { renderSavedReports } = await import('./lib/saved-reports.mjs');
+  console.log(renderSavedReports(path.resolve(dir)));
 }
 
 async function freeze(flags) {
@@ -440,7 +463,7 @@ commands
   run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR] [--concurrency N]
            [--interactive]
-  report   <runDir>                 re-render report.md from results.json
+  report   <runDir|sweepDir>        re-render Markdown/HTML results without model calls
   sweep    --follow-up RUN --models FILE [--parallel-runs 1] [--concurrency 4]
   sweep    --model-checks --models FILE [--parallel-runs 1] [--concurrency 4]
 

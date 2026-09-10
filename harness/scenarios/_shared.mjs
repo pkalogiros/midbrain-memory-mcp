@@ -1,3 +1,4 @@
+import { clientName, requestedModel, testName } from '../lib/report-copy.mjs';
 // Helpers shared by scenarios: run a turn and persist it, read rows back by marker.
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
@@ -9,8 +10,13 @@ import { readLogTail, midbrainLogPath } from '../lib/evidence.mjs';
 export async function runTurn({ ctx, client, project, prompt, scenarioId, label, sessionId, resume = false, hookTrust, acceptHooks }) {
   const evidenceDir = ctx.evidenceDir(client.id, scenarioId);
   assertCandidate(ctx.candidate);
+  prompt = client.formatPrompt?.(prompt) ?? prompt;
   ctx.writeJson(path.join(evidenceDir, `${label}.prompt.json`), { client: client.id, project, prompt, sessionId, resume, hookTrust, acceptHooks });
+  const progress = `${clientName(client.id)} (${requestedModel(client)}) · ${testName(scenarioId)} · ${label}`;
+  ctx.log?.(`Asking ${progress}`);
   const turn = await client.runTurn({ ctx, project, prompt, sessionId, resume, evidenceDir, label, hookTrust, acceptHooks });
+  ctx.log?.(`${turn.timedOut ? 'Time limit reached' : turn.exitCode !== 0 || turn.isError ? 'Client returned an error' : 'Client finished'} · ${progress} · ${Math.round(turn.durationMs / 1000)} s · exit=${turn.exitCode}`);
+  for (const failure of turn.hookFailures || []) ctx.log?.(`WARNING · ${client.id} · ${scenarioId}/${label} · ${failure}`);
   assertCandidate(ctx.candidate);
   turn.captureCwd = client.id === 'nanoclaw' ? '/workspace/agent' : '~/' + path.relative(realpathSync(ctx.dirs.home), realpathSync(project)).split(path.sep).join('/');
   const file = path.join(evidenceDir, `${label}.json`);

@@ -1,5 +1,6 @@
 // Claude Code manifest + headless driver (claude -p … --output-format stream-json).
 import path from 'node:path';
+import { estimateMessages } from '../lib/costs.mjs';
 import { randomUUID } from 'node:crypto';
 import { spawnCapture, whichSync } from '../lib/proc.mjs';
 import { childEnv } from '../lib/context.mjs';
@@ -48,6 +49,7 @@ export default {
     if (model) args.push('--model', model);
     const rawPath = path.join(evidenceDir, `${label}.ndjson`);
     const startedAt = new Date().toISOString();
+    const usageMessages = [];
     const turn = {
       client: 'claude', sessionId: sid, prompt, finalText: '', toolCalls: [], init: null,
       exitCode: null, durationMs: 0, rawPath, stderr: '', isError: false, timedOut: false, startedAt, nativeCapture: true,
@@ -61,6 +63,7 @@ export default {
       onStdoutLine: (line) => {
         let ev;
         try { ev = JSON.parse(line); } catch { return; }
+        if (ev.type === 'assistant' && !ev.isApiErrorMessage) usageMessages.push(ev.message);
         if (ev.type === 'system' && ev.subtype === 'init') {
           turn.init = { mcpServers: ev.mcp_servers || [], tools: ev.tools || [], model: ev.model || null, sessionId: ev.session_id || null };
         } else if (ev.type === 'assistant') {
@@ -86,6 +89,9 @@ export default {
           turn.isError = Boolean(ev.is_error);
           if (ev.session_id) turn.sessionId = ev.session_id;
           turn.cost = ev.total_cost_usd ?? null;
+          turn.usage = ev.usage;
+          turn.modelUsage = ev.modelUsage;
+          turn.costSource = "Claude CLI total_cost_usd";
           turn.numTurns = ev.num_turns ?? null;
         }
       },
@@ -94,6 +100,7 @@ export default {
     turn.durationMs = r.durationMs;
     turn.stderr = r.stderr.slice(-4000);
     turn.timedOut = r.timedOut;
+    if (turn.cost == null) Object.assign(turn, estimateMessages(usageMessages), { costIncomplete: true, costSource: 'Native assistant usage; 2026-09-10 standard Anthropic rates; interrupted turn may be incomplete' });
     return turn;
   },
 

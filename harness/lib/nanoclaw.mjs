@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 // harness supplies a local mailbox transport; it never simulates provider
 // messages, invokes capture hooks, or patches the runner/provider source.
 import path from 'node:path';
+import { estimateUsage } from './costs.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync, rmSync, lstatSync } from 'node:fs';
 import { spawnCapture } from './proc.mjs';
@@ -56,10 +57,16 @@ export function parseTranscript(text, prompt) {
   const toolCalls = [];
   const byId = new Map();
   const nativeMessages = new Map();
+  const usageMessages = new Map();
+  const hookFailures = [];
   let sessionId = null;
-  if (start < 0) return { sessionId, toolCalls };
+  if (start < 0) return { sessionId, toolCalls, hookFailures };
   for (const r of rows.slice(start)) {
+    if (r.attachment?.type === 'hook_cancelled' && r.attachment.timedOut) {
+      hookFailures.push(`${r.attachment.hookEvent || 'Native'} hook timed out after ${Math.round(r.attachment.timeoutMs / 1000)} s`);
+    }
     if (r.sessionId) sessionId = r.sessionId;
+    if (r.type === 'assistant' && r.message?.id && r.message.usage && !r.isApiErrorMessage) usageMessages.set(r.message.id, { model: r.message.model, usage: r.message.usage });
     if (r.type === 'assistant' && r.message?.stop_reason === 'end_turn') {
       const text = (r.message.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
       if (text && r.message.id) nativeMessages.set(r.message.id, { id: r.message.id, text });
@@ -79,7 +86,10 @@ export function parseTranscript(text, prompt) {
   const providerError = lastAssistant?.isApiErrorMessage
     ? `${lastAssistant.error || 'API error'} (HTTP ${lastAssistant.apiErrorStatus || 'unknown'}): ${(lastAssistant.message?.content || []).map(b => b.text || '').join(' ')}`
     : null;
-  return { sessionId, toolCalls, nativeAssistantMessages: [...nativeMessages.values()], providerError };
+  const usage = [...usageMessages.values()];
+  const estimates = usage.map(r => estimateUsage(r.model, r.usage));
+  const estimatedCost = estimates.length && estimates.every(n => n !== null) ? estimates.reduce((a, b) => a + b, 0) : null;
+  return { sessionId, toolCalls, nativeAssistantMessages: [...nativeMessages.values()], providerError, hookFailures, usage, estimatedCost };
 }
 
 function writeJson(file, data) { writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 }); }
@@ -358,7 +368,7 @@ export class NanoClawRuntime {
       parsed = parseTranscript(text, prompt);
     }
     if (sid) this.sessions.set(sid, session);
-    return { client: 'nanoclaw', sessionId: sid, nanoSessionId: session.id, containerId: container, inboundId, prompt, finalText: this.redact(selectReply(snapshot.messages, inboundId)), toolCalls: parsed.toolCalls, nativeAssistantMessages: parsed.nativeAssistantMessages, init: null, exitCode, timedOut, isError: snapshot.ack !== 'completed' || !transcript || !parsed.sessionId || Boolean(parsed.providerError), providerError: parsed.providerError || null, durationMs: Date.now() - started, rawPath, stderr: timedOut ? mailboxError : '', nativeCapture: true, evidenceDir };
+    return { client: 'nanoclaw', usage: parsed.usage, estimatedCost: parsed.estimatedCost, costSource: '2026-09-10 Anthropic standard rates; native message IDs deduplicated', sessionId: sid, nanoSessionId: session.id, containerId: container, inboundId, prompt, finalText: this.redact(selectReply(snapshot.messages, inboundId)), toolCalls: parsed.toolCalls, nativeAssistantMessages: parsed.nativeAssistantMessages, hookFailures: parsed.hookFailures, init: null, exitCode, timedOut, isError: snapshot.ack !== 'completed' || !transcript || !parsed.sessionId || Boolean(parsed.providerError), providerError: parsed.providerError || null, durationMs: Date.now() - started, rawPath, stderr: timedOut ? mailboxError : '', nativeCapture: true, evidenceDir };
   }
 
   clearNpxCache() {

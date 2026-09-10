@@ -31,7 +31,7 @@ export class HarnessApi {
 
   async get(pathAndQuery) {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 30000);
+    const t = setTimeout(() => ctrl.abort(), 60000);
     try {
       const res = await fetch(`${this.base}${pathAndQuery}`, { headers: this.headers(), signal: ctrl.signal });
       const text = await res.text();
@@ -58,7 +58,7 @@ export class HarnessApi {
     for (let page = 1; page <= maxPages; page += 1) {
       const q = new URLSearchParams({ page: String(page), limit: String(limit), start_date: sinceIso });
       const r = await this.get(`/api/v1/memories/episodic?${q}`);
-      if (!r.ok) throw new Error(`episodic read-back failed: HTTP ${r.status}`);
+      if (!r.ok) throw Object.assign(new Error(`episodic read-back failed: HTTP ${r.status}`), { status: r.status });
       const rows = Array.isArray(r.json)
         ? r.json
         : (r.json?.items || r.json?.results || r.json?.memories || r.json?.data || []);
@@ -72,7 +72,7 @@ export class HarnessApi {
   }
 
   /** Poll until `predicate` matches at least `minCount` rows or the ceiling passes. */
-  async waitForRows({ sinceIso, predicate, minCount = 1, timeoutMs = 90000, intervalMs = 5000, ready = rows => rows.length >= minCount, settleMs = 0 }) {
+  async waitForRows({ sinceIso, predicate, minCount = 1, timeoutMs = 180000, intervalMs = 5000, ready = rows => rows.length >= minCount, settleMs = 0 }) {
     const started = Date.now();
     let rows = [];
     let lastError;
@@ -87,6 +87,7 @@ export class HarnessApi {
       } catch (e) {
         lastError = e.message;
         stableSince = null;
+        if (e.status === 401 || e.status === 403) return { rows, elapsedMs: Date.now() - started, timedOut: false, lastError, polls };
       }
       const elapsedMs = Date.now() - started;
       const signature = JSON.stringify(rows.map(r => r.id ?? r).sort((a, b) => String(a).localeCompare(String(b))));

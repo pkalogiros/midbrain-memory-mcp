@@ -12,6 +12,14 @@ it('reports an unavailable readback API as blocked', async () => {
   await expect(readback({ options: {} }, api, 'marker', {})).rejects.toMatchObject({ blocked: true, message: expect.stringContaining('service unavailable') });
 });
 
+it('stops readback immediately on rejected credentials instead of reporting missing captures', async () => {
+  const api = new HarnessApi({ baseUrl: 'http://unused', key: 'unused' });
+  api.get = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+  await expect(readback({ options: {} }, api, 'marker', { sinceIso: new Date().toISOString() }))
+    .rejects.toMatchObject({ blocked: true, message: expect.stringContaining('HTTP 401') });
+  expect(api.get).toHaveBeenCalledTimes(1);
+});
+
 it('preserves native provider-error evidence before blocking the scenario', async () => {
   const home = os.tmpdir();
   const ctx = { dirs: { run: home, home }, turns: [], writeJson: vi.fn(), evidenceDir: () => home };
@@ -20,6 +28,15 @@ it('preserves native provider-error evidence before blocking the scenario', asyn
     .rejects.toMatchObject({ blocked: true, message: expect.stringContaining('billing_error') });
   expect(ctx.turns).toHaveLength(1);
   expect(ctx.writeJson.mock.calls[1][1].providerError).toBe('billing_error (HTTP 400)');
+});
+
+it('records and sends the same client-formatted prompt', async () => {
+  const home = os.tmpdir();
+  const ctx = { dirs: { run: home, home }, turns: [], writeJson: vi.fn(), evidenceDir: () => home };
+  const client = { id: 'nanoclaw', formatPrompt: p => `${p}\nUse the delivery wrapper.`, runTurn: vi.fn(async () => ({ exitCode: 0, durationMs: 1 })) };
+  await runTurn({ ctx, client, project: home, prompt: 'exact marker', scenarioId: 's01', label: 'turn' });
+  expect(client.runTurn.mock.calls[0][0].prompt).toBe('exact marker\nUse the delivery wrapper.');
+  expect(ctx.writeJson.mock.calls[0][1].prompt).toBe(client.runTurn.mock.calls[0][0].prompt);
 });
 
 it('does not label post-upgrade capture as a cold first turn', async () => {
@@ -149,6 +166,17 @@ describe('turn reuse (cost): same evidence, fewer prompts', () => {
     expect(cells.map(c => c.status)).toEqual(['PASS', 'PASS', 'PASS', 'PASS']);
     expect(cells[0].notes).toContain('post-upgrade capture');
     expect(ctx.meta.captureEvidence.claude.rb).toBe(rb);
+    // Simple's upgraded checkpoint also feeds S2 and S8 without another prompt.
+    const { default: s08 } = await import('../harness/scenarios/s08-marker-robustness.mjs');
+    const literal = '<!-- mb:ctx-start --> midbrain-memory-rules:start MBH-x';
+    ctx.options.simple = true;
+    ctx.meta.candidateCapture.claude.seed = { m: 'MBH-x', value: 'VALUE-hidden', literal };
+    ctx.meta.candidateCapture.claude.turn.finalText = literal;
+    rows.forEach(row => { row.text = literal; });
+    await s01.run({ ctx, api, client, project: os.tmpdir() });
+    expect(ctx.meta.s02Writes.claude.value).toBe('VALUE-hidden');
+    expect((await s08.run({ ctx, api, client, project: os.tmpdir() }))[0].status).toBe('PASS');
+
   });
 
   it('hook ordering is derived from the S1 capture instead of a new turn', async () => {
@@ -250,7 +278,7 @@ it('simple mode builds S5 on the client S2 checkpoint and trims the OpenCode and
   const mk = (id) => ({ id, expectedCaptureLabel: id, specific: id === 'hermes' ? ['hook-acceptance'] : ['plugin-process-separation'],
     runTurn: async ({ prompt }) => { prompts.push(prompt); return turn(prompt, prompt.includes('Reply with exactly') ? { finalText: 'x' } : { toolCalls: [{ name: 'midbrain__memory_search', input: { query: 'MBH-w' }, result: 'VALUE-new is current', ok: true }] }); } });
   const base = { dirs: { run: root, home: root, logs: root }, options: { indexGraceMs: 0, simple: true }, turns: [], evidenceDir: () => root, writeJson() {}, subMarker: (id, s) => `MBH-${id}-${s}` };
-  const api = { waitForRows: async () => ({ rows: rows.concat(rows), elapsedMs: 1, polls: 1, timedOut: true, lastError: null }) };
+  const api = { waitForRows: async () => ({ rows: rows.concat({ ...rows[0], text: prompts.find(p => p.startsWith('Update for task')) || '' }), elapsedMs: 1, polls: 1, timedOut: false, lastError: null }) };
   try {
     const ctx = { ...base, meta: { s02Writes: { hermes: { m: 'MBH-w', value: 'VALUE-old', wTurn: turn('w'), rb, since: '2026-09-10T00:00:00.000Z' } }, captureEvidence: { hermes: { turn: turn('s1'), rb, evidence: ['e'] } } } };
     const cells = await s05.run({ ctx, api, client: mk('hermes'), project });
@@ -266,4 +294,48 @@ it('simple mode builds S5 on the client S2 checkpoint and trims the OpenCode and
     expect(prompts).toHaveLength(1); // capture only, no MCP recall turn
     expect(ocCells[0].notes).toContain('required-only');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+it('allows a slow verification request beyond 30 seconds but aborts at 60 seconds', async () => {
+  vi.useFakeTimers();
+  try {
+    const api = new HarnessApi({ baseUrl: 'http://unused', key: 'unused' });
+    vi.stubGlobal('fetch', vi.fn((_url, { signal }) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve({ ok: true, status: 200, text: async () => '[]' }), 45000);
+      signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('request timed out')); }, { once: true });
+    })));
+    const slow = api.get('/test');
+    await vi.advanceTimersByTimeAsync(45000);
+    expect((await slow).ok).toBe(true);
+    vi.stubGlobal('fetch', vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('request timed out')), { once: true });
+    })));
+    const stalled = expect(api.get('/test')).rejects.toThrow('request timed out');
+    await vi.advanceTimersByTimeAsync(60000);
+    await stalled;
+  } finally { vi.unstubAllGlobals(); vi.useRealTimers(); }
+});
+
+
+it('counts only a proven read of a preceding MidBrain result file', async () => {
+  const { memoryEvidence } = await import('../harness/lib/checks.mjs');
+  const source = { name: 'midbrain__memory_search', ok: true, result: 'Output has been saved to /tmp/tool-results/result.txt.\nFormat: Plain text' };
+  const read = { name: 'Bash', ok: true, input: { command: 'grep -n "TASK" /tmp/tool-results/result.txt' }, result: 'VALUE-secret' };
+  expect(memoryEvidence({ toolCalls: [source, read] })).toContain('VALUE-secret');
+  expect(memoryEvidence({ toolCalls: [read, source] })).not.toContain('VALUE-secret');
+  expect(memoryEvidence({ toolCalls: [source, { ...read, input: { command: 'grep -n "TASK" /tmp/other.txt' } }] })).not.toContain('VALUE-secret');
+});
+
+it('clears recovered Codex stream errors only on successful completion, retaining terminal failures', async () => {
+  const { recordCodexOutcome } = await import('../harness/clients/codex.mjs');
+  const turn = {};
+  recordCodexOutcome(turn, { type: 'error', message: 'Reconnecting' });
+  expect(turn.isError).toBe(true);
+  recordCodexOutcome(turn, { type: 'turn.completed' });
+  expect(turn.isError).toBe(false);
+  expect(turn.recoveredErrors).toHaveLength(1);
+  recordCodexOutcome(turn, { type: 'turn.failed' });
+  recordCodexOutcome(turn, { type: 'turn.completed' });
+  expect(turn.isError).toBe(true);
 });

@@ -9,6 +9,10 @@ for diagrams, the file map, setup and run recipes, results parsing, and release 
 An [offline HTML edition](../docs/testing/harness-how-it-works.html) includes the complete
 guide and embedded diagrams in one shareable file; open it directly in a browser.
 
+Pi support is also a product change: the published package includes its adapter,
+extension and installer detection. Only its harness selection is opt-in. Include
+Pi in the release notes and product review; it is not merely a test driver.
+
 Pi is available explicitly with `--clients pi` or, for cross-client recall,
 `--clients claude,pi`. The existing five-client default and required release
 matrix are unchanged. Pi is installed under the run's tools directory using
@@ -21,10 +25,23 @@ node harness/run.mjs run --clients pi --scenarios s01,s03,s06 --mode registry --
 node harness/run.mjs run --clients claude,pi --scenarios s01,s02 --simple --mode registry --keep
 ```
 
+NanoClaw prompts preserve the requested answer inside its required
+`<message to="harness">...</message>` delivery wrapper, avoiding unnecessary format
+retries. The exact prompt sent is saved as evidence; capture and recall checks
+are unchanged. Native hook timeouts appear as console warnings and in turn JSON.
+
 Pi's native extension captures `message_end` events; the driver records its JSON
 stream and native session files. No capture is replayed by the harness. Use a
 clean candidate run for Pi; releases predating Pi support cannot supply a valid
 `--upgrade` baseline.
+
+Fresh validation on 2026-09-10: NanoClaw capture, cold wake, resume and legacy
+recovery passed **10/10 checks in 2m 18s** (`20260910-132046-7f06`); Pi capture
+and fresh-session recall passed **10/10 in 1m 09s** (`20260910-132050-ce74`).
+Both used four prompts and left real homes unchanged. The separate Claude/Codex/
+Hermes upgrade refresh passed current-candidate capture for all three; its two
+remaining failures were previous-release Claude capture and a local API 401 during
+Hermes accepted-hook capture. These are targeted checks, not a full release gate.
 
 ## Quick start (this machine)
 
@@ -109,8 +126,8 @@ node harness/run.mjs sweep --follow-up /absolute/path/to/baseline-run --models m
 
 `--concurrency` is the total client-worker budget across rounds, divided between
 `--parallel-runs` (default 1). Sweeps accept up to 10 total workers, with at most
-5 per round; ordinary runs still accept 1–5. For two four-client rounds, use
-`--parallel-runs 2 --concurrency 8` to allow four workers in each isolated home.
+5 per round; ordinary runs still accept 1–5. Use the measured four-worker budget
+for shipping runs. Budgets above five are experimental and not recommended yet.
 Model-check cross-client reads lock only their reader once the checkpoint is
 complete, so all four reads can overlap. Cold capture and infrastructure cases
 retain their existing ordering. The default sweep budget remains 4.
@@ -127,9 +144,74 @@ Measured on 2026-09-10: the two four-client model-check rounds above completed i
 113 PASS / 7 FAIL, real-home isolation passed). This was standalone model coverage,
 not verified infrastructure reuse. The eight-worker attempt stopped at the local
 API probe with HTTP 401 before any prompts, so its speedup is not yet measured.
+That probe uses the harness key directly, before isolated client homes are populated;
+it is an authentication failure, not evidence of load or client key propagation.
+Runs now probe before building the candidate or starting the registry. Readback
+stops immediately on HTTP 401/403 and reports BLOCKED rather than waiting for capture.
 See the [operator guide](../docs/testing/harness-how-it-works.md#fast-model-checks-and-sweeps)
 or its [HTML page](../docs/testing/harness-how-it-works.html#fast-model-checks-and-sweeps)
 for the profiles, commands and evidence limits.
+
+## HTML results, live logs and costs
+
+Completed runs and sweeps also write a standalone `report.html`: timing, models, coverage,
+failed checks and per-client cost accounting. Regenerate saved results without model
+calls using `node harness/run.mjs report /absolute/path/to/run-or-sweep`.
+
+HTML and Markdown findings name the client, requested model, test, and sweep round.
+Cross-client findings name both the client that saved the fact and the client asked to
+recall it, with both model pins. Each finding explains the observed problem and next step;
+original checks and verdicts remain available as technical evidence. Live scenario failures
+use the same explanations. Historical console logs are preserved as recorded.
+
+Capture verification allows 60 seconds per API request and a 3-minute polling budget
+(default `--readback-timeout-ms 180000`, also settable with
+`MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS`). An in-flight request may finish beyond that
+budget. Successful checks finish early; authentication errors still stop immediately.
+
+Console progress includes setup, each scenario and model turn, and a 30-second heartbeat.
+Sweeps stream round-prefixed progress live and update `<round>/runner.log` continuously.
+Press Ctrl+C to cancel active/queued work and invoke process, container and registry cleanup.
+On macOS/Linux, native subprocess groups are terminated together. Cleanup is bounded;
+provider work already dispatched can still incur cost.
+
+The new four-client/two-round sweep `20260910-135656-d7cc` took **22m 46s**
+with four workers: **87 PASS / 17 FAIL / 16 BLOCKED**. Both real-home isolation checks
+passed. Of 48 planned prompts, 40 were attempted and 38 returned turn records;
+API readback failures prevented the eight final freshness questions. This is a failed
+model-check run, not release sign-off or a passing speed benchmark.
+
+| Client | Reported USD | Estimated USD | ChatGPT API-equivalent USD | Accounting |
+|---|---|---|---|---|
+| claude | $0.248139 | $0.079174 | $0.000000 | 10/10 attempts; 2 interrupted estimates may omit auxiliary usage |
+| codex | $0.000000 | $0.000000 | $0.609012 | 10/10 attempts |
+| hermes | $0.000000 | $0.698991 | $0.000000 | 10/10 attempts |
+| nanoclaw | $0.000000 | $0.449287 | $0.000000 | 8/10 attempts; Docker launch failures have no model usage record |
+
+**Available API subtotal: $1.475591** ($0.248139 reported + $1.227451 estimated). Codex adds **$0.609012 API-equivalent**, recorded separately because this run used ChatGPT authentication.
+
+This is not a complete invoice: two NanoClaw launch attempts have no usage record,
+and two interrupted Claude estimates may omit unreported auxiliary work. All 38
+returned turn records have either reported costs, estimates or plan equivalents.
+Runner and MidBrain backend costs remain unmetered. The early host load exceeded 180;
+the run also recorded Docker launch failures, native hook timeouts, a Codex TLS
+reconnection error, two five-minute Claude timeouts and API readback failures.
+These observed conditions limit the timing comparison; no failures were erased.
+
+| Round | Available API subtotal | Codex API-equivalent | Time |
+|---|---|---|---|
+| fast | $0.385836 | $0.293879 | 22m 29s |
+| sonnet | $1.089755 | $0.315133 | 22m 46s |
+
+`costs.json` and the refreshed Markdown/HTML reports contain the reconciled accounting.
+The original `results.json` and `sweep.json` are retained unchanged; their cost fields
+predate recovery of interrupted Claude usage and inclusion of failed launch attempts.
+Regenerating reports reads the saved native usage and updates `costs.json` without model calls.
+
+The earlier 11m 36s sweep `20260910-101821-a704` remains historical evidence:
+113 PASS / 7 FAIL and only $0.42764350 of Claude costs recorded. Its subtotal is
+not comparable to this fuller four-client accounting. Neither run proves a passing
+15-minute sweep. Parallelism alone does not guarantee lower provider spend.
 
 ## Fully local mode (no MidBrain cloud)
 
@@ -196,7 +278,7 @@ S4 also requires `MIDBRAIN_HARNESS_PROJECT_API_KEY`. Cross-client S2 requires at
 runnable clients and their provider credentials. Legacy opener migration (S10) requires
 registry mode; dev mode records it as BLOCKED because automatic migration is bypassed in
 a temporary dev installation. **FAIL, BLOCKED, an empty run, or real-home drift exits 1**;
-only PASS cells with clean isolation exit 0.
+PASS and BLOCKED cells with clean isolation exit 0. BLOCKED means incomplete coverage, not a failed run; failed checks still exit 1. Release verification still requires all required checks to pass.
 
 The adapter pins NanoClaw to `6656b326a900dcfba4be8ca76412d954cfc915b5` and records the
 source revision, image digest, runner lockfile hash, and candidate identity in `nanoclaw.json`.
@@ -303,8 +385,7 @@ provider rate limits. Prompt counts and pass/fail checks are unchanged.
 
 Cross-client recall follows one cycle in manifest order:
 OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode. Every client writes once
-and reads once. This uses five pairs / ten prompts instead of twenty pairs / twenty-five
-prompts. In every mode a writer stores one checkpoint that all of its readers read, so the
+and reads once. Simple reuses the S1 checkpoint, so S2 uses five pairs / five new reader prompts instead of twenty pairs / twenty-five prompts in Full mode. In every mode a writer stores one checkpoint that all of its readers read, so the
 full matrix costs five writes plus twenty reads, not forty prompts, and the indexing grace is
 paid once per writer. All other selected scenarios and their pass/fail checks are unchanged;
 the savings apply to cross-client recall, not the entire bill.
@@ -321,7 +402,7 @@ recall) and Codex persisted hook approval. Three more simple-only reuses: S5 tre
 client's own S2 checkpoint as the stale state (only the update and the ask are new prompts),
 OpenCode's plugin-only case stops at the verified capture (recall is covered by S2/S3), and
 Hermes' accepted-hooks half is S1's own capture. Required mode keeps all of them explicit. A
-full upgrade matrix is 106 prompts (was 132), a simple one 67 (was 102).
+full five-client upgrade matrix is 107 planned prompts. Simple now reuses S1’s hidden-value/literal checkpoint for S2 and S8: 58 planned prompts (68 before this reuse; both include Claude’s cold-home probe), with the same assertions. Without upgrades, S3 also reuses that checkpoint. For the four-client Claude/Codex/Hermes/NanoClaw selection, Simple with upgrades plans 47 prompts instead of 55. This saves two prompts per client with upgrades, three without; actual counts vary with selected clients and blocked prerequisites.
 
 Client subsets form a cycle in the same stable order; at least two clients are needed
 for cross-client recall. Unavailable clients keep their place and affected links are

@@ -31,6 +31,10 @@ export default {
   ],
   specific: ['cold-wake', 'session-resume', 'legacy-opener-recovery'],
 
+  formatPrompt(prompt) {
+    return `${prompt}\n\nDelivery format: put the requested reply inside <message to="harness">...</message>. Any exact-text or JSON requirement above applies to the text inside that wrapper.`;
+  },
+
   runtime(ctx) {
     const runtime = runtimes.get(ctx);
     if (!runtime) throw new Error('NanoClaw was not prepared');

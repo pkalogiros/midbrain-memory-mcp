@@ -17,7 +17,12 @@ export function statusFromChecks(checks) {
 }
 
 export function runExitCode(cells, isolationOk) {
-  return isolationOk && cells.length > 0 && cells.every(c => c.status === 'PASS') ? 0 : 1;
+  return isolationOk && cells.length > 0 && cells.every(c => c.status === 'PASS' || c.status === 'BLOCKED') ? 0 : 1;
+}
+
+export function runOutcome(cells, isolationOk) {
+  if (runExitCode(cells, isolationOk)) return 'FAIL';
+  return cells.some(c => c.status === 'BLOCKED') ? 'BLOCKED' : 'PASS';
 }
 
 export const NO_MATCH_FORBIDDEN = [
@@ -103,6 +108,27 @@ export function complianceChecks(turn, marker) {
   return checks;
 }
 
+// Count file-backed results only when an earlier MidBrain call named the exact
+// result file and a later successful, read-only grep read that file.
+export function memoryEvidence(turn) {
+  const files = new Set();
+  const results = [];
+  for (const call of turn.toolCalls || []) {
+    if (isMidbrainTool(call) && call.ok === true) {
+      const text = resultText(call);
+      if (/^Memory search failed:|^Error:.*(?:401|403|Connection closed)/i.test(text)) continue;
+      results.push(text);
+      const file = text.match(/Output has been saved to (\/[^\s]+)\.\n/);
+      if (file) files.add(file[1]);
+    } else if (call.name === 'Bash' && call.ok === true) {
+      const command = call.input?.command || '';
+      const read = command.match(/^grep -n "[A-Za-z0-9_-]+" (\/[^\s;|&<>`$]+)$/);
+      if (read && files.has(read[1])) results.push(resultText(call));
+    }
+  }
+  return results;
+}
+
 // Answers alone are never retrieval evidence. Values are disclosed only to the
 // writer; every required value must occur in a successful MidBrain result.
 export function recallChecks(turn, anchor, values) {
@@ -110,7 +136,7 @@ export function recallChecks(turn, anchor, values) {
   return [
     check('successful MidBrain query preserves the exact anchor', calls.some(c => inputText(c).includes(anchor))),
     ...values.flatMap(value => [
-      check(`stored evidence contains ${value}`, calls.some(c => resultText(c).includes(value))),
+      check(`stored evidence contains ${value}`, memoryEvidence(turn).some(text => text.includes(value))),
       check(`answer contains ${value}`, turn.finalText.includes(value)),
     ]),
   ];

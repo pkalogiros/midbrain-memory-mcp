@@ -17,11 +17,11 @@ export default {
     const reused = ctx.meta.candidateCapture?.[client.id];
     let m, since, prompt, turn, rb, seed;
     if (reused) {
-      ({ marker: m, since, prompt, turn, rb } = reused);
+      ({ marker: m, since, prompt, turn, rb, seed } = reused);
     } else {
       m = ctx.subMarker(client.id, 'capture');
       prompt = `Please remember this exactly: the harness marker for this session is ${m}. Reply with just the marker.`;
-      if (ctx.options.modelChecks) {
+      if (ctx.options.simple) {
         const value = 'VALUE-' + randomBytes(8).toString('hex');
         const literal = `<!-- mb:ctx-start --> midbrain-memory-rules:start ${m}`;
         prompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it. Reply with only this exact literal line: ${literal}`;
@@ -30,10 +30,10 @@ export default {
       since = sinceNow();
       turn = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'turn-1' });
       rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1, minAssistant: 1 });
-      if (seed) {
-        ctx.meta.s02Writes ||= {};
-        ctx.meta.s02Writes[client.id] = { ...seed, wTurn: turn, rb, since, readers: 0, readyAt: Date.now() + ctx.options.indexGraceMs };
-      }
+    }
+    if (seed) {
+      ctx.meta.s02Writes ||= {};
+      ctx.meta.s02Writes[client.id] = { ...seed, wTurn: turn, rb, since, readers: 0, readyAt: Date.now() + ctx.options.indexGraceMs };
     }
     const foreign = rb.rows.filter((r) => rowMeta(r).client && rowMeta(r).client !== client.expectedCaptureLabel);
     const evidence = [relEvidence(ctx, turn.rawPath), relEvidence(ctx, turn.jsonPath)];

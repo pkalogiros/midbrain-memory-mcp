@@ -125,6 +125,14 @@ export default {
   },
 
   async runTurn({ ctx, project, prompt, sessionId, resume = false, evidenceDir, label = 'turn', acceptHooks = true }) {
+    const readUsage = async id => {
+      if (!id) return null;
+      const python = path.join(ctx.dirs.tools, 'hermes/tools/hermes-agent/bin/python');
+      const query = "import sqlite3,json,sys; c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); c.row_factory=sqlite3.Row; r=c.execute('SELECT model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,estimated_cost_usd,actual_cost_usd,cost_source FROM sessions WHERE id=?',(sys.argv[2],)).fetchone(); print(json.dumps(dict(r) if r else None))";
+      const result = await spawnCapture(python, ['-c', query, path.join(ctx.dirs.home, '.hermes/state.db'), id], { env: this.clientEnv(ctx), timeoutMs: 10000 });
+      try { return JSON.parse(result.stdout); } catch { return null; }
+    };
+    const beforeUsage = resume ? await readUsage(sessionId) : null;
     const args = ['chat', '-q', prompt, '-Q', '--provider', this.options.provider, '-m', this.options.model, '--pass-session-id'];
     if (resume && sessionId) args.push('--resume', sessionId);
     const rawPath = path.join(evidenceDir, `${label}.stdout.txt`);
@@ -157,6 +165,14 @@ export default {
       } else {
         turn.exportError = `${exp.stderr}`.trim().slice(-300);
       }
+    }
+    const usage = await readUsage(turn.sessionId);
+    if (usage && (!resume || beforeUsage)) {
+      const delta = key => typeof usage[key] === 'number' && (!beforeUsage || typeof beforeUsage[key] === 'number') ? usage[key] - (beforeUsage?.[key] || 0) : null;
+      turn.usage = Object.fromEntries(['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens'].map(key => [key, delta(key)]));
+      turn.cost = delta('actual_cost_usd');
+      turn.estimatedCost = delta('estimated_cost_usd');
+      turn.costSource = usage.cost_source;
     }
     if (/agent failed|Unknown provider|No LLM provider/i.test(`${r.stdout}\n${r.stderr}`)) turn.isError = true;
     return turn;

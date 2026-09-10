@@ -1,4 +1,7 @@
+import { runOutcome } from './checks.mjs';
+import { attentionText, findingContext, failedCheckText } from './report-copy.mjs';
 // Side-by-side report (design doc "Suggested report shape") + JSON results.
+import { costLabel } from './costs.mjs';
 export const ROWS = [
   'Clean install',
   'Reproducibility',
@@ -48,6 +51,7 @@ export function renderMarkdown(results) {
   const lines = [];
   lines.push(`# MidBrain multi-client parity report — run ${run.runId}`);
   lines.push('');
+  lines.push(`Result: **${run.finishedAt ? runOutcome(cells, isolation.ok) : 'INCOMPLETE'}**. BLOCKED means incomplete coverage and does not itself fail the run.`, '');
   lines.push('| Field | Value |');
   lines.push('|---|---|');
   lines.push(`| Run type | ${run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
@@ -56,7 +60,10 @@ export function renderMarkdown(results) {
     lines.push('| Prior evidence | Project isolation, upgrade and client-specific checks were verified in the baseline, not rerun or counted as new passes. |');
   }
   if (run.modelChecks && !run.followup) lines.push('| Coverage limit | Project isolation, upgrade and client-specific cases were not run or verified. This report cannot serve as a baseline or release sign-off. |');
-  if (run.promptCount !== undefined) lines.push(`| New prompts | ${run.promptCount}; ${Object.entries(run.promptsByClient || {}).map(([id, n]) => `${id}=${n}`).join(', ')} |`);
+  if (run.promptCount !== undefined) lines.push(`| Returned turn records | ${run.promptCount}; ${Object.entries(run.promptsByClient || {}).map(([id, n]) => `${id}=${n}`).join(', ')} |`);
+  if (run.costs) lines.push(`| Prompt attempts | ${run.costs.totalTurns}; includes failed launches |`);
+  for (const [id, costs] of Object.entries(run.costs?.clients || {})) lines.push(`| ${esc(id)} cost | ${esc(costLabel(costs))} |`);
+  lines.push(`| Model cost accounting | ${esc(costLabel(run.costs))}; excludes unreported usage, runner and backend costs. |`);
   lines.push(`| Client concurrency | ${run.concurrency ?? 1} (cold capture, upgrade and client-specific scenarios serial) |`);
   if (run.crossClientPairs) lines.push(`| Planned cross-client links | ${run.crossClientPairs.map(p => `${esc(p.writer)} → ${esc(p.reader)}`).join(', ') || 'None selected'} |`);
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
@@ -68,6 +75,7 @@ export function renderMarkdown(results) {
   lines.push(`| Read-back ceiling / index grace | ${run.readbackTimeoutMs} ms / ${run.indexGraceMs} ms |`);
   lines.push(`| Isolation (real home untouched) | ${isolation.ok ? BADGE.PASS : BADGE.FAIL}${isolation.drift.length ? ` — ${isolation.drift.length} surface(s) drifted` : ''} |`);
   lines.push('');
+  lines.push('## What needs attention', '', attentionText(cells.map(c => findingContext(c, run.models)), { markdown: true }), '');
   lines.push('## Clients');
   lines.push('');
   lines.push('| Client | Version | Runnable | Config shape (hashes) | Known exceptions |');
@@ -95,11 +103,13 @@ export function renderMarkdown(results) {
     for (const d of isolation.drift) lines.push(`- \`${d.surface}\`: ${d.before} → ${d.after}`);
     lines.push('');
   }
-  lines.push('## Cell details');
+  lines.push('## Technical evidence', '', 'PASS means the expectation was verified. FAIL means it was not verified. BLOCKED means a prerequisite prevented the check. A failed check alone does not establish a memory defect.');
   lines.push('');
   for (const cell of cells) {
     lines.push(`### ${cell.row} · ${cell.clientDisplay || cell.client} · ${cell.scenario} — ${BADGE[cell.status]}`);
     lines.push('');
+    if (cell.status !== 'PASS') lines.push(findingContext(cell, run.models).context, '');
+    if (cell.diagnosis) lines.push(cell.diagnosis.what, '', `Next step: ${cell.diagnosis.next}`, '');
     if (cell.notes) lines.push(`${cell.notes}`, '');
     if (cell.prompt) lines.push(`Prompt: \`${esc(cell.prompt)}\``, '');
     if (cell.expected) lines.push(`Expected: ${cell.expected}`, '');
@@ -107,7 +117,7 @@ export function renderMarkdown(results) {
     if (cell.checks && cell.checks.length) {
       lines.push('| Check | Result | Detail |');
       lines.push('|---|---|---|');
-      for (const ch of cell.checks) lines.push(`| ${esc(ch.name)} | ${ch.ok ? '✅' : '❌'} | ${esc(ch.detail)} |`);
+      for (const ch of cell.checks) lines.push(`| ${esc(ch.ok ? ch.name : failedCheckText(ch))} | ${ch.ok ? '✅' : '❌'} | ${esc(ch.detail)} |`);
       lines.push('');
     }
     if (cell.evidence && cell.evidence.length) {

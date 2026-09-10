@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { check, complianceChecks, isMidbrainTool, inputText, resultText } from '../lib/checks.mjs';
+import { check, complianceChecks, isMidbrainTool, inputText, memoryEvidence } from '../lib/checks.mjs';
 import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } from './_shared.mjs';
 
 export default {
@@ -46,7 +46,7 @@ export default {
         ...turnChecks(rTurn),
         check('reader made at least one MidBrain tool call', memCalls.length >= 1, `calls=${memCalls.length}`),
         check('a MidBrain call input contains the marker verbatim', memCalls.some((c) => inputText(c).includes(m))),
-        check('successful MidBrain result contains the writer verification value', memCalls.some((c) => c.ok === true && resultText(c).includes(value))),
+        check('successful MidBrain result contains the writer verification value', memoryEvidence(rTurn).some(text => text.includes(value))),
         check('reader final answer contains the hidden writer value', rTurn.finalText.includes(value)),
       ] }),
       cell({ row: 'Rule and priming compliance', scenario: this.id, client: reader, prompt: readPrompt, expected: 'memory-first ordering, anchor preserved, search deepened on miss', evidence, notes: `recall from ${writer.id}`, checks: complianceChecks(rTurn, m) }),
