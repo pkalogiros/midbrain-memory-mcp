@@ -89,6 +89,7 @@ export function keyCollidesWithRealHome(key, home = os.homedir()) {
     '.config/opencode/.midbrain-key',
     '.config/hermes/.midbrain-key',
     '.config/nanoclaw/.midbrain-key',
+    '.config/pi/.midbrain-key',
   ].map((r) => path.join(home, r));
   const target = hashOf(String(key).trim());
   for (const f of files) {

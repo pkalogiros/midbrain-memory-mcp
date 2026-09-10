@@ -317,6 +317,9 @@ async function writeGlobalRules(opts = {}) {
       client: 'claude',
     });
   }
+  if (clients.has('pi')) {
+    targets.push({ path: path.join(process.env.PI_CODING_AGENT_DIR || path.join(homeDir, '.pi', 'agent'), 'AGENTS.md'), client: 'agents' });
+  }
   if (clients.has('hermes')) {
     targets.push({
       path: path.join(
@@ -352,7 +355,7 @@ async function writeProjectRules(projectDir, opts = {}) {
   ]);
   const targets = [];
 
-  const codeClients = clients.has('codex') || clients.has('opencode');
+  const codeClients = ['codex', 'opencode', 'pi'].some(id => clients.has(id));
   let needsAgents = codeClients;
   const needsClaude = clients.has('claude') || clients.has('nanoclaw');
   let agentsClient = 'agents';

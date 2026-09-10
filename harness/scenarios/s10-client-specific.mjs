@@ -106,7 +106,9 @@ async function hookAcceptance({ ctx, api, client, project, scenarioId }) {
   const checks = [], evidence = [];
   try {
     rmSync(allowlist, { force: true });
-    for (const accepted of [false, true]) {
+    // Simple mode: the accepted half is S1's own capture (hooks accepted by default); derive it.
+    const s1 = ctx.options?.simple ? ctx.meta?.captureEvidence?.[client.id] : null;
+    for (const accepted of s1 ? [false] : [false, true]) {
       const marker = ctx.subMarker(client.id, accepted ? 'accepted' : 'unapproved');
       const since = sinceNow();
       const t = await runTurn({ ctx, client, project, prompt: `Reply with exactly ${marker}`, scenarioId,
@@ -119,7 +121,11 @@ async function hookAcceptance({ ctx, api, client, project, scenarioId }) {
       if (accepted) checks.push(...captureCountChecks(rb.rows, t), ...metadataChecks(rb.rows, client.expectedCaptureLabel, t.captureCwd, t.sessionId));
       else checks.push(check('no user or assistant capture before acceptance', rb.timedOut && rb.rows.length === 0));
     }
-    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-acceptance`, client, expected, evidence, checks });
+    if (s1) {
+      evidence.push(...s1.evidence);
+      checks.push(...captureCountChecks(s1.rb.rows, s1.turn), ...metadataChecks(s1.rb.rows, client.expectedCaptureLabel, s1.turn.captureCwd, s1.turn.sessionId));
+    }
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/hook-acceptance`, client, expected, evidence, checks, notes: s1 ? 'simple mode: accepted-hooks capture derived from s01-capture' : '' });
   } finally {
     if (original) writeFileSync(allowlist, original);
     else rmSync(allowlist, { force: true });
@@ -163,17 +169,25 @@ async function pluginProcessSeparation({ ctx, api, client, project, scenarioId }
     writer = await runTurn({ ctx, client, project, prompt: `Remember checkpoint ${marker}: verification value ${value}. Reply with exactly ${marker}.`, scenarioId, label: 'plugin-without-mcp' });
     rb = await readback(ctx, api, marker, { sinceIso: since, minUser: 1, minAssistant: 1 });
   } finally { writeFileSync(file, original); }
-  await grace(ctx);
-  const reader = await runTurn({ ctx, client, project, prompt: `Recall checkpoint ${marker} from MidBrain and report its exact verification value.`, scenarioId, label: 'mcp-restored' });
   const rbFile = path.join(ctx.evidenceDir(client.id, scenarioId), 'plugin-only.readback.json');
   ctx.writeJson(rbFile, rb);
+  const captureChecks = [...turnChecks(writer), ...captureCountChecks(rb.rows, writer), check('native capture settled', !rb.timedOut && !rb.lastError)];
+  // Simple mode stops at the capture: recall through MCP for this client is already proven by S2/S3.
+  if (ctx.options?.simple) {
+    return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/plugin-process-separation`, client,
+      expected: 'The plugin captures with its MCP entry disabled.', notes: 'simple mode: MCP recall of the plugin-only row omitted (required-only); S2/S3 cover recall',
+      evidence: [relEvidence(ctx, writer.jsonPath), relEvidence(ctx, rbFile)], checks: captureChecks });
+  }
+  await grace(ctx);
+  const reader = await runTurn({ ctx, client, project, prompt: `Recall checkpoint ${marker} from MidBrain and report its exact verification value.`, scenarioId, label: 'mcp-restored' });
   return cell({ row: 'Client-specific scenarios', scenario: `${scenarioId}/plugin-process-separation`, client,
     expected: 'The plugin captures with its MCP entry disabled; a new process with MCP enabled retrieves the hidden value.',
     evidence: [relEvidence(ctx, writer.jsonPath), relEvidence(ctx, reader.jsonPath), relEvidence(ctx, rbFile)],
-    checks: [...turnChecks(writer), ...captureCountChecks(rb.rows, writer), check('native capture settled', !rb.timedOut && !rb.lastError),
-      ...turnChecks(reader), ...recallChecks(reader, marker, [value])] });
+    checks: [...captureChecks, ...turnChecks(reader), ...recallChecks(reader, marker, [value])] });
 }
 
+// Cases whose product behaviour only moves with a client release; simple mode leaves them to --required.
+const REQUIRED_ONLY = new Set(['hook-trust-persisted']);
 const HANDLERS = { 'hook-ordering': hookOrdering, 'plugin-process-separation': pluginProcessSeparation, 'self-repair-smoke': selfRepairSmoke, 'cold-first-turn': coldFirstTurn, 'hook-trust-persisted': hookTrustPersisted, 'hook-acceptance': hookAcceptance };
 
 export default {
@@ -187,6 +201,7 @@ export default {
     if (client.specificCases) return client.specificCases(args);
     const cells = [];
     for (const name of client.specific || []) {
+      if (args.ctx.options?.simple && REQUIRED_ONLY.has(name)) continue; // covered by the required matrix
       const handler = HANDLERS[name];
       if (!handler) {
         cells.push(cell({ row: 'Client-specific scenarios', scenario: `${this.id}/${name}`, client, blockedReason: `client-specific case "${name}" has no handler yet` }));

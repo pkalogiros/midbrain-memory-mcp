@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { exportBundle, verifyBundle } from '../harness/scripts/release-evidence.mjs';
 import { fileHash } from '../harness/lib/candidate.mjs';
-import { ORDER, MANIFESTS } from '../harness/clients/index.mjs';
+import { DEFAULT_CLIENTS as ORDER, MANIFESTS } from '../harness/clients/index.mjs';
 import { SCENARIOS } from '../harness/scenarios/index.mjs';
 
 const roots = [];

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { fileHash } from '../lib/candidate.mjs';
 import { runExitCode } from '../lib/checks.mjs';
 import { renderMarkdown } from '../lib/report.mjs';
-import { ORDER, MANIFESTS } from '../clients/index.mjs';
+import { DEFAULT_CLIENTS as ORDER, MANIFESTS } from '../clients/index.mjs';
 import { SCENARIOS } from '../scenarios/index.mjs';
 import { collectSecrets, loadDotEnv } from '../lib/env.mjs';
 
@@ -134,7 +134,7 @@ export function exportBundle(runDir, output, secrets = []) {
   const scrub = redactor(runSecrets(root, secrets), root);
   const results = scrub({
     harnessVersion: source.harnessVersion,
-    run: pick(source.run, ['required', 'simple', 'crossClientPairs', 'runId', 'marker', 'platform', 'arch', 'osRelease', 'node', 'startedAt', 'finishedAt', 'readbackTimeoutMs', 'indexGraceMs', 'models']),
+    run: pick(source.run, ['required', 'simple', 'concurrency', 'crossClientPairs', 'runId', 'marker', 'platform', 'arch', 'osRelease', 'node', 'startedAt', 'finishedAt', 'readbackTimeoutMs', 'indexGraceMs', 'models']),
     candidate: candidateSummary(candidate),
     clients: source.clients.map(c => pick(c, ['id', 'displayName', 'version', 'runnable', 'blockedReason', 'knownExceptions', 'mechanism', 'configShape'])),
     cells: source.cells.map(c => pick(c, ['row', 'scenario', 'client', 'clientDisplay', 'status', 'checks', 'prompt', 'expected', 'evidence', 'notes', 'blockedReason'])),

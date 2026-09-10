@@ -10,6 +10,13 @@ Works with [OpenCode](https://opencode.ai),
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), plus
 [NanoClaw](https://nanoclaw.dev) via the bundled `/add-midbrain` skill.
 
+Pi support is also available: after starting [Pi](https://pi.dev) once, run the
+MidBrain installer and restart Pi. The installer adds an owned extension under
+`~/.pi/agent/extensions/midbrain-memory/` (or `PI_CODING_AGENT_DIR`). It exposes
+MidBrain tools and captures native user/assistant messages with Pi session and
+project metadata. Global rules live in Pi's `AGENTS.md`; project setup writes
+the project's `AGENTS.md`. Existing user extensions and credentials are preserved.
+
 [![npm version](https://img.shields.io/npm/v/midbrain-memory-mcp.svg?style=flat-square)](https://www.npmjs.com/package/midbrain-memory-mcp)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-brightgreen?style=flat-square)](#prerequisites)
 

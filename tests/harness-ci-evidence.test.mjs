@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { collectCiEvidence } from '../harness/scripts/ci-evidence.mjs';
 import { fileHash } from '../harness/lib/candidate.mjs';
-import { ORDER, MANIFESTS } from '../harness/clients/index.mjs';
+import { DEFAULT_CLIENTS as ORDER, MANIFESTS } from '../harness/clients/index.mjs';
 import { SCENARIOS } from '../harness/scenarios/index.mjs';
 
 const roots = [];

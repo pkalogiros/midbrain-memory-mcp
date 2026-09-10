@@ -5,6 +5,7 @@ export default {
   id: 's06-no-match-clean',
   title: 'No-match cleanliness',
   kind: 'single',
+  parallel: true,
   parity: true,
   rows: ['No-match clean'],
   async run({ ctx, client, project }) {

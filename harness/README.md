@@ -9,6 +9,23 @@ for diagrams, the file map, setup and run recipes, results parsing, and release 
 An [offline HTML edition](../docs/testing/harness-how-it-works.html) includes the complete
 guide and embedded diagrams in one shareable file; open it directly in a browser.
 
+Pi is available explicitly with `--clients pi` or, for cross-client recall,
+`--clients claude,pi`. The existing five-client default and required release
+matrix are unchanged. Pi is installed under the run's tools directory using
+`@earendil-works/pi-coding-agent`; set `MIDBRAIN_HARNESS_PI_VERSION` to pin it and
+`MIDBRAIN_HARNESS_PI_MODEL` to choose an Anthropic model (default
+`claude-haiku-4-5`). It uses the dedicated harness `ANTHROPIC_API_KEY`.
+
+```bash
+node harness/run.mjs run --clients pi --scenarios s01,s03,s06 --mode registry --keep
+node harness/run.mjs run --clients claude,pi --scenarios s01,s02 --simple --mode registry --keep
+```
+
+Pi's native extension captures `message_end` events; the driver records its JSON
+stream and native session files. No capture is replayed by the harness. Use a
+clean candidate run for Pi; releases predating Pi support cannot supply a valid
+`--upgrade` baseline.
+
 ## Quick start (this machine)
 
 ```bash
@@ -33,6 +50,86 @@ The run prints the path to `report.md`. Everything else for that run sits next t
   report.md       matrix + per-cell detail
   isolation.json  real-home tripwire diff (must be empty)
 ```
+
+## Fast follow-ups and model sweeps
+
+For a quick model comparison without an infrastructure baseline:
+
+```bash
+node harness/run.mjs run --model-checks --clients claude,codex,hermes,nanoclaw --concurrency 4 --keep
+```
+
+This runs the six-prompt profile below and explicitly marks infrastructure as
+unverified. It cannot serve as a baseline or release sign-off. For a sweep, use
+`sweep --model-checks --models models.json --parallel-runs 2 --concurrency 4`.
+Existing infrastructure failures remain in their original reports.
+
+Prepare a baseline once for the candidate and client versions you want to test:
+
+```bash
+node harness/run.mjs run --clients claude,codex,hermes,nanoclaw --mode registry --upgrade --simple --scenarios s01,s04,s09,s10 --concurrency 4 --keep
+```
+
+The baseline must pass clean install, version stability, project isolation,
+upgrade, and all applicable client-specific cases. A full successful run also
+qualifies. Then point a follow-up at that completed run directory:
+
+```bash
+node harness/run.mjs run --follow-up /absolute/path/to/baseline-run --concurrency 4 --keep
+```
+
+Follow-ups use six prompts per selected client when two or more clients form a
+recall cycle: one combined capture/literal checkpoint, a no-match prompt, an own
+fresh-session recall, a cross-client recall, a state update, and a current-state
+question. They retain capture, metadata, duplicate, marker, recall, freshness and
+priming assertions. They reuse baseline infrastructure evidence; those checks
+are labelled as prior evidence and are not counted as new passes or release
+sign-off. Fresh homes, credentials, sessions, projects, markers, and logs prevent
+prior conversations from contaminating the result. Only prepared executable
+installations and the pinned NanoClaw image/source are reused.
+
+Candidate archive/source, harness source, client versions, Node/platform, API
+host and PK setting must match. Failed or missing baseline checks stop the run
+before model calls. Changing models is allowed. Changing code or client versions
+requires a new baseline; follow-ups cannot themselves become baselines.
+
+For multiple model choices, save a JSON file **outside `harness/`** (model data
+should not change the frozen harness source), for example `models.json`:
+
+```json
+[
+  {"name":"fast", "models":{"claude":"claude-haiku-4-5", "codex":"gpt-5.6-sol", "hermes":"claude-haiku-4-5", "nanoclaw":"claude-haiku-4-5"}},
+  {"name":"sonnet", "models":{"claude":"claude-sonnet-4-5", "codex":"gpt-5.6-sol", "hermes":"claude-sonnet-4-5", "nanoclaw":"claude-sonnet-4-5"}}
+]
+```
+
+```bash
+node harness/run.mjs sweep --follow-up /absolute/path/to/baseline-run --models models.json --parallel-runs 2 --concurrency 4
+```
+
+`--concurrency` is the total client-worker budget across rounds, divided between
+`--parallel-runs` (default 1). Sweeps accept up to 10 total workers, with at most
+5 per round; ordinary runs still accept 1–5. For two four-client rounds, use
+`--parallel-runs 2 --concurrency 8` to allow four workers in each isolated home.
+Model-check cross-client reads lock only their reader once the checkpoint is
+complete, so all four reads can overlap. Cold capture and infrastructure cases
+retain their existing ordering. The default sweep budget remains 4.
+Each round runs a representative directed cycle,
+not every model combination. A round's failure does not discard the other
+rounds; the sweep fails if any round fails or is incomplete. `sweep.json` and
+`report.md` record actual elapsed time, prompt counts, models and report links.
+The 15-minute target depends on model latency and sweep size; it is not a timeout
+that hides unfinished checks. SIGINT/SIGTERM cancel active rounds and their normal
+registry/container cleanup still runs.
+
+Measured on 2026-09-10: the two four-client model-check rounds above completed in
+**11m 36s**, including cleanup, with `--parallel-runs 2 --concurrency 4` (48 prompts,
+113 PASS / 7 FAIL, real-home isolation passed). This was standalone model coverage,
+not verified infrastructure reuse. The eight-worker attempt stopped at the local
+API probe with HTTP 401 before any prompts, so its speedup is not yet measured.
+See the [operator guide](../docs/testing/harness-how-it-works.md#fast-model-checks-and-sweeps)
+or its [HTML page](../docs/testing/harness-how-it-works.html#fast-model-checks-and-sweeps)
+for the profiles, commands and evidence limits.
 
 ## Fully local mode (no MidBrain cloud)
 
@@ -183,6 +280,27 @@ For a smaller run that retains the other scenarios, add `--simple`:
 node harness/run.mjs run --mode registry --upgrade --simple
 ```
 
+To overlap independent clients without reducing coverage, use:
+
+```bash
+node harness/run.mjs run --mode registry --upgrade --simple --concurrency 3
+```
+
+`--concurrency` accepts 1–5 (default 1). Ordinary scenarios run up to that many
+client jobs at once, including their capture polling and indexing waits. Each
+scenario finishes before the next starts; turns inside each job remain sequential.
+Cross-client jobs reserve both writer and reader so neither client runs twice at
+once, and each writer's checkpoint is still captured and indexed only once.
+Disjoint pairs may start out of manifest order; results retain planned job order.
+The five-link simple cycle can overlap at most two pairs at a time.
+
+Installation, the upgrade prelude, S1 cold capture, and S10 configuration/repair
+cases remain serial. S4 clients all await one project installation before their
+turns begin. New scenarios are serial unless explicitly marked parallel-safe.
+The report, partial/final JSON and exported evidence record the concurrency limit.
+Use `--concurrency 1` for serial troubleshooting; higher concurrency can encounter
+provider rate limits. Prompt counts and pass/fail checks are unchanged.
+
 Cross-client recall follows one cycle in manifest order:
 OpenCode → Claude → Codex → Hermes → NanoClaw → OpenCode. Every client writes once
 and reads once. This uses five pairs / ten prompts instead of twenty pairs / twenty-five
@@ -199,15 +317,27 @@ marker (the leak check spans the S1 write); and in simple mode only, S3 is score
 prelude's checkpoint write and fresh-session recall on the candidate instead of two more
 prompts. Simple mode also leaves two required-only checks to `--required`: S4's global
 recall from a directory that never saw the installer (proj-a already proves global-credential
-recall) and Codex persisted hook approval. Required mode keeps all of them. A full upgrade
-matrix is 106 prompts (was 132), a simple one 74 (was 102).
+recall) and Codex persisted hook approval. Three more simple-only reuses: S5 treats the
+client's own S2 checkpoint as the stale state (only the update and the ask are new prompts),
+OpenCode's plugin-only case stops at the verified capture (recall is covered by S2/S3), and
+Hermes' accepted-hooks half is S1's own capture. Required mode keeps all of them explicit. A
+full upgrade matrix is 106 prompts (was 132), a simple one 67 (was 102).
 
 Client subsets form a cycle in the same stable order; at least two clients are needed
 for cross-client recall. Unavailable clients keep their place and affected links are
 BLOCKED. `results.json`, the report and exported evidence record simple mode and the
 planned links. A passing simple run is reduced-coverage validation, not full required
 sign-off. `--simple --required` is rejected; omit `--simple` for all ordered pairs.
-No live simple matrix has been recorded yet; selection and evidence handling are unit-tested.
+Live validation on 2026-09-10 (`20260910-082009-e52c`, all five clients,
+`--mode registry --upgrade --simple --concurrency 3`) completed in 33m 52s:
+87 PASS, 7 FAIL, and no real-home drift. The parallel stages took 15m 57s for
+31m 54s of combined job time; the log showed at most three jobs and no
+overlapping jobs for the same client. This is measured overlap, not a separate
+serial benchmark. The failures concern freshness/priming, previous-release
+Claude assistant capture, and OpenCode plugin-only assistant capture; this run
+is not passing release evidence.
+A focused Claude capture/freshness control with `--concurrency 1` subsequently
+passed all nine checks (`20260910-085437-8e83`); the full-run failures remain recorded.
 
 NanoClaw retains a per-group npm cache populated by its installer. Deployments
 using ephemeral homes need the same durable cache mount (`/home/node/.npm`) to

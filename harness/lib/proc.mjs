@@ -10,6 +10,7 @@ export function spawnCapture(cmd, args, {
   input = '',
   stdoutFile = null,
   onStdoutLine = null,
+  signal = null,
 } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -32,6 +33,9 @@ export function spawnCapture(cmd, args, {
       const hard = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, 5000);
       if (typeof hard.unref === 'function') hard.unref();
     }, timeoutMs);
+    const abort = () => { try { child.kill('SIGTERM'); } catch { /* already gone */ } };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
     const flushLines = (final = false) => {
       if (!onStdoutLine) return;
       let i;
@@ -55,14 +59,16 @@ export function spawnCapture(cmd, args, {
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
     child.on('error', (err) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       if (out) out.end();
       resolve({ code: -1, signal: null, stdout, stderr: `${stderr}\n[spawn error] ${err.message}`, timedOut, durationMs: Date.now() - started, error: err.message });
     });
-    child.on('close', (code, signal) => {
+    child.on('close', (code, exitSignal) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       flushLines(true);
       if (out) out.end();
-      resolve({ code, signal, stdout, stderr, timedOut, durationMs: Date.now() - started });
+      resolve({ code, signal: exitSignal, stdout, stderr, timedOut, durationMs: Date.now() - started });
     });
     if (input) child.stdin.write(input);
     child.stdin.end();

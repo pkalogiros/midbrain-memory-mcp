@@ -26,12 +26,15 @@ export function tripwireSurfaces(home = os.homedir()) {
   const hermesHome = process.env.HERMES_HOME?.trim()
     ? path.resolve(process.env.HERMES_HOME.trim())
     : path.join(home, '.hermes');
+  const piDir = process.env.PI_CODING_AGENT_DIR?.trim() ? path.resolve(process.env.PI_CODING_AGENT_DIR.trim()) : path.join(home, '.pi', 'agent');
   const opencodeDir = path.join(home, '.config', 'opencode');
   const nanoclawRoots = NANOCLAW_DIRS.map((dir) => path.join(home, dir));
   if (process.env.NANOCLAW_HOME?.trim()) {
     nanoclawRoots.unshift(path.resolve(process.env.NANOCLAW_HOME.trim()));
   }
   return [
+    ...['AGENTS.md', 'settings.json', 'auth.json', 'extensions/midbrain-memory/index.ts', 'extensions/midbrain-memory/runtime.mjs'].map(file => path.join(piDir, file)),
+    path.join(home, '.config', 'pi', '.midbrain-key'),
     path.join(home, '.claude.json'),
     path.join(home, '.claude', 'settings.json'),
     path.join(home, '.codex', 'config.toml'),

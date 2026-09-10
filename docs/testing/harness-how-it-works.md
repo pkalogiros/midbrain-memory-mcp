@@ -13,7 +13,9 @@ For command options, see the [argument reference](#commands-and-arguments).
 ## What it is
 
 The harness tests a release candidate of `midbrain-memory-mcp` against defined checks in five
-real AI clients: OpenCode, Claude Code, Codex, Hermes and NanoClaw. Behavioral runs use real
+default AI clients: OpenCode, Claude Code, Codex, Hermes and NanoClaw. Pi is also
+supported explicitly with `--clients pi` or a list such as `--clients claude,pi`;
+the default and required five-client matrix is unchanged. Behavioral runs use real
 models, product hooks and the MidBrain API, with controlled fixtures and a local NanoClaw
 mailbox transport. Unit tests separately mock dependencies to test harness logic.
 
@@ -43,7 +45,7 @@ flowchart TB
     Freeze --> Install["Product installer"]
     subgraph Private["Private run directory on one machine"]
         Install --> Home["Isolated home and test projects"]
-        Home --> Clients["OpenCode, Claude, Codex, Hermes"]
+        Home --> Clients["OpenCode, Claude, Codex, Hermes<br/>Pi (opt-in)"]
         Home --> Nano["NanoClaw upstream runner in Docker"]
         Clients --> Product["Candidate MCP server and native capture hooks"]
         Nano --> Product
@@ -149,6 +151,12 @@ the same checks; it does not promise identical answers, tokens or latency on eve
    and isolation is clean. `--required` additionally requires registry+upgrade mode and the
    full client/scenario selection. A focused green run is only a checkpoint.
 
+Ordinary runs default to one worker; `--concurrency 1–5` overlaps only scenarios
+marked parallel-safe. Cold capture, upgrade and client-specific cases remain serial.
+Scenario boundaries remain barriers, and active operations on the same client never
+overlap within a run. Model-check runs stop after S5 and share a checkpoint across
+capture, literal preservation and recall; see [fast model sweeps](#fast-model-checks-and-sweeps).
+
 ## Missing prerequisites and failure handling
 
 The harness launches selected clients and handles known failure cases with explicit checks. It does not autonomously troubleshoot the machine or install every missing prerequisite. A failure can affect one client, one scenario, or the whole run.
@@ -187,6 +195,7 @@ All paths below are relative to this repository. The harness is development tool
 | [shared/agent-rules.mjs](../../shared/agent-rules.mjs) | Managed memory-first instructions. Behavioral compliance checks measure whether clients follow them. |
 | [plugins/claude-code/](../../plugins/claude-code/), [plugins/codex/](../../plugins/codex/), [plugins/hermes/](../../plugins/hermes/) | Native capture handlers invoked by each client. |
 | [plugins/opencode/midbrain-memory.ts](../../plugins/opencode/midbrain-memory.ts), [dist/midbrain-shared.mjs](../../dist/midbrain-shared.mjs) | OpenCode plugin and built runtime bundle, including capture completion at shutdown. |
+| [shared/clients/pi.mjs](../../shared/clients/pi.mjs), [plugins/pi/extension.mjs](../../plugins/pi/extension.mjs) | Pi installation and native `message_end` capture extension; the built runtime also bridges MidBrain MCP tools. |
 | [skills/nanoclaw/](../../skills/nanoclaw/) | Product integration instructions/configuration for a NanoClaw group. NanoClaw uses the Claude capture handlers with its own client identity. |
 
 Four product changes accompanied this testing work and require release review separately
@@ -203,7 +212,10 @@ an old report validate the new source SHA.
 
 | File | Role |
 |---|---|
-| `harness/run.mjs` | The CLI: `doctor`, `freeze`, `run`, `report`. Owns the run lifecycle above, signal handling and cleanup. |
+| `harness/run.mjs` | The CLI: `doctor`, `freeze`, `run`, `sweep`, `report`. Owns the run lifecycle above, signal handling and cleanup. |
+| `harness/lib/scheduler.mjs` | Bounded workers, per-client resource locks and scenario barriers; completed model-check checkpoints allow reader-only S2 locks. |
+| `harness/lib/followup.mjs` | Six-prompt profile, strict baseline compatibility checks, prepared executable reuse, and model-round validation. |
+| `harness/lib/sweep.mjs` | Concurrent model rounds in separate homes, total worker budget, cancellation and combined timing/results. |
 | `harness/lib/context.mjs` | Run identity (id, marker like `MBH-A27DDB`), run directories, and the scrubbed child environment. |
 | `harness/lib/env.mjs` | Loads `harness/.env` into absent or empty environment variables; nonempty values win. |
 | `harness/lib/candidate.mjs` | Packs the candidate, extracts it, installs its runtime, snapshots file hashes, asserts they are unchanged. |
@@ -243,6 +255,7 @@ client-specific behavior can require additional cases; those are declared by the
 | `codex.mjs` | `codex exec --json`, ChatGPT-login reuse or `codex login --with-api-key`, hook-trust bypass for ordinary turns; the persisted-trust case automates native UI approval by default; use `--interactive` for manual approval. |
 | `opencode.mjs` | Installed run-locally with npm, driven with `opencode run`, native stream parsed, truncated tool output recovered from its output files. |
 | `hermes.mjs` | Installed run-locally with `uv tool install hermes-agent[mcp]`, `hermes chat -q`, evidence from its session export, hook consent toggle. |
+| `pi.mjs` | Opt-in, run-local `@earendil-works/pi-coding-agent`; JSON mode, native sessions and `message_end` extension capture. Pin with `MIDBRAIN_HARNESS_PI_VERSION` and `MIDBRAIN_HARNESS_PI_MODEL` (default `claude-haiku-4-5`). |
 | `nanoclaw.mjs` | Thin manifest over `lib/nanoclaw.mjs`; owns the NanoClaw lifecycle cases. |
 
 ### Scenarios (`harness/scenarios/`)
@@ -299,6 +312,9 @@ schema. `tests/harness-codex-approval.test.mjs` covers approval guards and offer
 opt-in real-CLI check without model calls; `harness-release-evidence.test.mjs` and
 `harness-ci-evidence.test.mjs` cover export, redaction and gate preservation.
 `tests/harness-simple.test.mjs` covers cycle selection, unavailable clients and mode labels.
+`tests/harness-parallel.test.mjs` covers worker limits, locks and draining;
+`tests/harness-followup.test.mjs` covers profile constraints and baseline validity.
+`tests/pi.test.mjs` covers the Pi adapter and native extension capture.
 `tests/harness-nanoclaw-package.test.mjs` checks package identity, asset integrity, cleanup
 and loading without source preparation.
 The [design](multi-client-harness.md) records coverage limits and manual-checklist gaps;
@@ -351,6 +367,127 @@ its compliance checks operate inside S2/S3/S5.
 When editing a prompt, review its expected outcome and deterministic checks together, keep
 hidden values out of reader prompts, then run the focused scenario. Keep the old evidence;
 a prompt change needs a new run. There is no CLI `--prompt` override.
+
+## Prompt examples
+
+The exact templates the harness sends, with the placeholders it fills in. Every marker is
+unique per run and per cell, and every "fresh session" is a new client process with a new
+session id. Values in square brackets are generated; the reader never sees a hidden value
+in its own prompt.
+
+**1. Basic memory capture (S1)**
+
+> Please remember this exactly: the harness marker for this session is [MARKER]. Reply with just the marker.
+
+Checks that the user message and the assistant reply reach memory with the right client
+label, session id and working directory, exactly once, and that no other client's rows carry
+the marker.
+
+**2. Remember something in one client, retrieve it in another (S2)**
+
+First client:
+
+> Checkpoint for task [TASK_ID]: the verification value is [VALUE]. Remember it and acknowledge briefly.
+
+Second client, fresh session:
+
+> Search your MidBrain memory for task [TASK_ID] and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say "not found after search".
+
+The second prompt never contains the verification value, so the reader must retrieve it
+through a MidBrain tool call whose query carries the task id verbatim. Each writer stores one
+checkpoint that every reader reads.
+
+**3. Continue work in a fresh session (S3)**
+
+First session:
+
+> We are working on task [TASK_ID]. Checkpoint: the next step is to rename the function [ALPHA_NAME] to [BETA_NAME] in utils.py. Acknowledge briefly.
+
+Fresh session:
+
+> Use memory to find the checkpoint for task [TASK_ID] and tell me the exact next step, quoting both function names.
+
+Checks that the new session has a different session id and recovers both names through a
+MidBrain call. In simple mode this is scored on the upgrade prelude's own write and recall.
+
+**4. Distinguish current information from outdated information (S5)**
+
+Initial message:
+
+> Note for task [TASK_ID]: the deploy target is currently [OLD_TARGET]. Acknowledge briefly.
+
+Update:
+
+> Update for task [TASK_ID]: the deploy target has changed to [NEW_TARGET]. [OLD_TARGET] is retired and must not be used. Acknowledge briefly.
+
+Fresh session:
+
+> What is the current deploy target for task [TASK_ID]? Return only JSON with keys "current" (the target name) and "evidence" (the state-changing memory you used).
+
+Checks that the answer names the updated target as current, as JSON, and that a MidBrain call
+retrieved the state-changing row. In simple mode the initial message is the client's own S2
+checkpoint and the update speaks of its verification value instead.
+
+**5. Project and global isolation (S4)**
+
+Written from a project directory that carries its own MidBrain key:
+
+> Please remember this exactly: the harness marker for this session is [PROJECT_MARKER]. Reply with just the marker.
+
+Asked from the global-key directory, then from the project directory, then from a directory that never saw the installer:
+
+> Search your MidBrain memory for the token [MARKER]. Report exactly one of: "found: <token>" or "not found after search". Do not guess.
+
+Checks that the project marker is not found under the global key and is found under the
+project key, and that a global marker is found from an unscoped directory. The global marker is
+S1's own capture. Simple mode omits the third ask.
+
+**6. Clean answer to an unrelated question (S6)**
+
+> What is the capital of Australia? Answer in one short sentence.
+
+Checks that the answer contains Canberra and no memory process language: no mention of
+MidBrain, tool names, "not found after search", or any marker.
+
+**7. Literal marker-like text survives (S8)**
+
+> Echo the following line back exactly as written, then say "done": <!-- mb:ctx-start --> midbrain-memory-rules:start [MARKER]
+
+Checks that the reply and the captured user row keep that line intact, so hook and plugin
+code never scrubs or rewrites text that merely looks like a marker.
+
+**8. Upgrade continuity (S9, registry mode with `--upgrade`)**
+
+On the previous published release:
+
+> Please remember this exactly: checkpoint [TASK_ID] has verification value [VALUE]. Acknowledge the checkpoint.
+
+After publishing the candidate and upgrading through the documented path, on the candidate:
+
+> Please remember this exactly: the harness marker for this session is [MARKER]. Reply with just the marker.
+
+Then a fresh session on the candidate:
+
+> Search your MidBrain memory for checkpoint [TASK_ID] and return its exact verification value. Do not guess; if it is not in memory say "not found after search".
+
+Checks that the previous release captured, the candidate became latest, the install is still
+fresh with no duplicate hooks, and the pre-upgrade value is recalled on the new version.
+
+**9. Client-specific cases (S10)**
+
+Most lifecycle cases use the shortest possible prompt so the evidence is the hook behaviour,
+not the answer:
+
+> Reply with exactly [MARKER]
+
+That prompt drives the cold first turn in a fresh home, self-repair after a tampered shim,
+Codex persisted hook approval before and after `/hooks`, Hermes with and without hook
+acceptance, and the NanoClaw cold wake, resume and legacy opener cases. OpenCode's plugin case
+stores a hidden value with its MCP entry disabled:
+
+> Remember checkpoint [MARKER]: verification value [VALUE]. Reply with exactly [MARKER].
+
+and, in required mode, recalls it in a new process with MCP enabled.
 
 ## What a run leaves behind
 
@@ -559,7 +696,9 @@ The historical Codex runs used a ChatGPT login; the workflow uses separately bil
 | Programmatic | Build, lint, tests, isolation; no models | Varies by machine; recent local checks under 2 min | $0 model usage | Not a behavioral matrix; runner compute still has a cost. |
 | Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | 2.0 min | About $0.09 | `20260910-080525-06d1` (32 PASS, on the reuse changes) and `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
 | Focused | One/two clients and selected scenarios | Depends on selection; one retained run took about 6 min | Varies | `20260908-090053-5472`; a targeted run is not comparable to full coverage. |
-| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links; 74 prompts after the reuse and trim changes | Not yet measured end to end: `20260910-073836-9210` was aborted by a harness edit mid-run, `20260910-080807-b79c` stopped by hand; projected about 40 min | Projected about $1.20 | Recommended for everyday behavioral checks. Reuses S1/S3/S4 evidence from the prelude and leaves two required-only checks to `--required`. |
+| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links; concurrency 3 | **33m 52s** | Not measured for this run | `20260910-082009-e52c`: 87 PASS / 7 FAIL; real-home isolation passed. Reduced coverage, not required sign-off. |
+| Model-check sweep | Claude, Codex, Hermes, NanoClaw; two rounds, 48 prompts; four total workers | **11m 36s** including cleanup | Not measured | Sweep `20260910-101821-a704`: 113 PASS / 7 FAIL; both homes isolated. Haiku 4.5 and Sonnet 4.5 rounds; Codex uses `gpt-5.6-sol` in both. Infrastructure omitted and unverified. |
+| Eight-worker attempt | Same two-round model-check profile, four workers per round | No model timing available | No model prompts started | `20260910-103509-f3c0`: both rounds stopped at the local API probe with HTTP 401. Eight-worker speedup is not yet measured. |
 | **Full matrix** | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | Broader cross-client confidence. `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
 | Required attempt | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
 
@@ -595,6 +734,93 @@ nor a more capable model automatically establishes sign-off: record the selected
 obtain a passing required run. Marker, recall and format failures remain failures until
 triaged; they are not automatically waived as model noise.
 
+## Fast model checks and sweeps
+
+For model iteration, `--model-checks` runs six prompts per client when at least two
+clients form a recall cycle. It uses registry mode and fresh homes, sessions, projects
+and markers. It is a smaller profile than Simple, not an accelerated full validation.
+
+| Prompt | Evidence checked |
+|---|---|
+| 1. Store a hidden-value checkpoint and echo a literal marker line | Native user/assistant capture, metadata, duplicate counts and literal preservation (S1/S8) |
+| 2. Answer an unrelated question | Clean no-match behavior (S6) |
+| 3. Recall the checkpoint in a new session | Own-client continuity and priming (S3) |
+| 4. Recall another client's checkpoint | Directed cross-client recall and priming (S2) |
+| 5. Update the checkpoint value | Capture of the actual new value, not just earlier recall requests |
+| 6. Ask a fresh session for the current value | Freshness, state-changing evidence and answer format (S5) |
+
+```bash
+node harness/run.mjs run --model-checks --clients claude,codex,hermes,nanoclaw --concurrency 4 --keep
+```
+
+Project isolation, upgrade and client-specific cases are **unverified** in this mode.
+Reports label that limit; model-check reports cannot be baselines or release sign-off.
+No failed infrastructure result is converted into a pass.
+
+For a model sweep, save the following as `models.json` **outside `harness/`** so model
+configuration does not change the frozen harness source. Each entry is an explicit
+round, not a request to enumerate every Cartesian combination:
+
+```json
+[
+  {"name":"fast","models":{"claude":"claude-haiku-4-5","codex":"gpt-5.6-sol","hermes":"claude-haiku-4-5","nanoclaw":"claude-haiku-4-5"}},
+  {"name":"sonnet","models":{"claude":"claude-sonnet-4-5","codex":"gpt-5.6-sol","hermes":"claude-sonnet-4-5","nanoclaw":"claude-sonnet-4-5"}}
+]
+```
+
+```bash
+# Four total workers: the configuration measured at 11m 36s
+node harness/run.mjs sweep --model-checks --models models.json --parallel-runs 2 --concurrency 4
+
+# Eight total workers: implemented and tested; live timing still unverified
+node harness/run.mjs sweep --model-checks --models models.json --parallel-runs 2 --concurrency 8
+```
+
+A sweep defaults to four total workers and one active round. `--concurrency` accepts
+1–10 for sweeps and 1–5 for ordinary runs; each round is capped at five workers.
+The total budget is divided across active rounds, rounded down. With two rounds and
+eight workers, each isolated home gets four. Once S1 checkpoints are complete,
+model-check S2 jobs lock only the reader, letting all four reads overlap. Other pair
+jobs retain both client locks. Cold capture and infrastructure ordering are unchanged.
+More workers can encounter provider limits or host contention; eight workers have no
+proven timing advantage yet. The default remains four.
+
+The sweep writes `sweeps/<id>/sweep.json` and `report.md`, with per-round reports under
+`<round>/runs/<id>/`. They record wall time, model selections, worker budgets, prompt
+counts and failures. A failed or incomplete round fails the sweep; other rounds still
+finish. SIGINT/SIGTERM cancel active rounds and invoke registry/container cleanup.
+
+### Reuse a verified infrastructure baseline
+
+For repeated runs of the same candidate, first establish a baseline:
+
+```bash
+node harness/run.mjs run --clients claude,codex,hermes,nanoclaw --mode registry --upgrade --simple --scenarios s01,s04,s09,s10 --concurrency 4 --keep
+```
+
+The baseline must be a completed original registry run with clean real-home isolation.
+Clean install, version stability, project isolation, upgrade and every applicable
+client-specific case must pass for each selected client. Candidate archive/source,
+harness source, client versions, Node/platform, API host and PK setting must match.
+Changing models is allowed; changing code or client versions requires a new baseline.
+Failed or missing baseline checks stop follow-up execution before model prompts.
+
+```bash
+node harness/run.mjs run --follow-up /absolute/path/to/baseline-run --concurrency 4 --keep
+node harness/run.mjs sweep --follow-up /absolute/path/to/baseline-run --models models.json --parallel-runs 2 --concurrency 8
+```
+
+Follow-ups run the same six-prompt profile, retain infrastructure checks as explicitly
+labelled prior evidence, and never count them as new passes. Prepared executables and
+pinned NanoClaw image/source can be reused; homes, credentials, caches, sessions and
+markers remain fresh. Neither follow-ups nor model-check runs can become baselines.
+Do not combine either profile with `--upgrade`, `--required`, `--scenarios` or dev mode.
+The two profile flags are mutually exclusive.
+
+The local baseline attempt `20260910-094834-a2b4` recorded 37 PASS / 7 FAIL with clean
+isolation. It does not qualify for four-client reuse. The 11m 36s measurement therefore
+used standalone model checks, not a successful baseline-follow-up run.
+
 ## Choose and run a suite
 
 “Default” marks the recommended everyday choice in this guide; it does not change CLI or
@@ -616,6 +842,7 @@ behavioral matrix. These are coverage choices, not statistical confidence guaran
 |---|---|---|
 | Programmatic | Build, lint, tests, docs and isolation gates | Separate prerequisite |
 | Smoke | S1 capture and S6 clean unrelated answers in all five clients | No |
+| Model checks / sweep | Six prompts per client, optionally across concurrent model rounds; infrastructure unverified unless a valid baseline is reused | No |
 | **Simple (Default)** | Everyday behavioral checks: all scenarios and upgrades, with one cross-client cycle | No |
 | **Full matrix** | Broader validation: all scenarios, upgrades and every ordered cross-client pair | Only when run as Required below |
 | Required | Full matrix with enforced release-coverage requirements | Yes, if complete, all checks pass and evidence verifies |
@@ -683,8 +910,7 @@ twenty ordered pairs with five shared writes and twenty reads, twenty-five S2 pr
 fifteen-prompt saving applies to S2, not the whole run or bill. In upgrade mode S1 also
 scores the prelude's post-upgrade capture instead of repeating it, Claude's hook-ordering case
 is derived from S1, S4 reuses S1's global write, and in simple mode S3 is scored on the
-prelude's write-then-fresh-recall pair. A full upgrade matrix is 106 prompts rather than 132;
-a simple run is 81 rather than 102. Every reused cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
+prelude's write-then-fresh-recall pair. Simple mode also leaves two required-only checks to `--required` (S4's recall from a directory that never saw the installer, and Codex persisted hook approval) and reuses three more turns: S5 builds on the client's own S2 checkpoint as the stale state, OpenCode's plugin-only case stops at the verified capture, and Hermes' accepted-hooks half is S1's capture. A full upgrade matrix is 106 prompts rather than 132; a simple run is 67 rather than 102. Every reused or trimmed cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
 clients. Unavailable clients keep their place in a simple cycle, and affected links are
 BLOCKED. The planned links are recorded in `run.crossClientPairs`.
 
@@ -751,14 +977,20 @@ disable it, rather than writing `--simple=false`).
 | `doctor` | Readiness checks; optional `--clients` and `--root`. No paid model calls. |
 | `freeze` | Build/package/extract the candidate and print its identity; optional `--mode`, default `dev`. Does not start a registry or run scenarios. |
 | `run` | Execute selected clients/scenarios, using the flags below. |
+| `sweep` | Explicit model rounds from `--models FILE`; requires `--model-checks` or `--follow-up RUN`. Supports `--parallel-runs`, total `--concurrency`, and `--root`. |
 | `report <runDir>` | Regenerate `report.md` from completed `results.json`; no model calls. |
 | `help` | Show command usage, client IDs and scenario IDs. |
 
 | Run flag | Default | Meaning / constraints |
 |---|---|---|
-| `--clients opencode,claude,codex,hermes,nanoclaw` | All five | Select clients by ID; manifest order controls execution and simple-cycle order. Forbidden with `--required`. |
+| `--clients opencode,claude,codex,hermes,nanoclaw` | All five; Pi opt-in | Select clients by ID (also `pi`); manifest order controls execution and simple-cycle order. Forbidden with `--required`. |
 | `--scenarios s01,s06` | All implemented scenarios | Comma-separated short IDs or full scenario IDs. No S7 driver. Forbidden with `--required`. |
 | `--mode dev` or `--mode registry` | `dev` | Direct extracted candidate or loopback npm installation. |
+| `--concurrency N` | Run: 1; model profiles/sweep: 4 | Run limit 1–5; sweep total 1–10, at most 5 per round. Default scenarios require explicit parallel safety. |
+| `--model-checks` | Off | Fixed six-prompt registry profile; infrastructure unverified. Implies simple cycle; incompatible with follow-up, upgrade, required, scenario filters or dev mode. |
+| `--follow-up RUN` | Off | Same profile with strictly verified prior infrastructure evidence and prepared tool reuse; defaults to baseline clients. |
+| `--models FILE` | Required for sweep | JSON array of uniquely named rounds with explicit client/model mappings. |
+| `--parallel-runs N` | Sweep: 1 | 1–5 active rounds, no greater than the total worker budget. Each round has a fresh home. |
 | `--upgrade` | Off | Previous-release upgrade prelude; requires registry mode. |
 | `--simple` | Off | One directed S2 cycle; other selected checks unchanged. Incompatible with `--required`. |
 | `--required` | Off | Full client/scenario selection and all ordered pairs; requires registry+upgrade, forbids filters and simple mode. |
@@ -786,7 +1018,9 @@ The run prints the path to `report.md`. Open it, then check:
    versions. `results.json` also records model pins in `run.models`. Confirm this is the
    intended candidate and configuration, not a report from before a fix.
 2. **Completeness and scope:** a finished timestamp and `results.json`, then `run.required`,
-   `run.simple` and selected clients/scenarios. Even a broad run without `--required` is a
+   `run.simple`, `run.modelChecks`, `run.followup` and selected clients/scenarios.
+   Model-check passes do not cover omitted infrastructure. Follow-up checks are prior evidence,
+   not fresh passes. Even a broad run without `--required` is a
    checkpoint. `results.partial.json` is progress after some scenarios, not completed evidence.
 3. **Isolation:** `results.isolation.ok` must be true, with an empty drift list. The sibling
    `isolation.json` contains before/after snapshot timestamps and drift, not an `ok` field.
@@ -933,6 +1167,121 @@ An RC-version rewrite changes archive bytes. A later repack with another version
 inherit this hash match, even when source code looks equivalent. Checksums detect mismatches;
 they are not authorship signatures. Verification complements programmatic CI and Radu's
 review under the [release checklist](../releases/README.md#release-validation-checklist).
+
+### Structured JSON and automated green/red decisions
+
+**The harness already writes machine-readable `results.json` on completed runs.** The
+exported bundle contains a redacted copy with the same cell/check fields. Parse that JSON
+for diagnostics; use the release verifier for the required behavioral gate. The verifier
+currently prints a text verdict and exits **0 for passing verification, 1 for rejection or
+error**. It does not yet emit a unified `decision.json` file, and the parsing snippet above
+prints a JSON summary followed by text diagnostics rather than one JSON document.
+
+This illustrative excerpt shows the existing result shape. Values are examples, and other
+run fields and cells are omitted; this excerpt is not a complete passing evidence bundle.
+
+```json
+{
+  "run": {
+    "runId": "example-run",
+    "required": true,
+    "finishedAt": "2026-09-10T18:00:00.000Z"
+  },
+  "cells": [
+    {
+      "row": "Cross-client recall",
+      "scenario": "s02-cross-client-recall",
+      "client": "codex",
+      "status": "FAIL",
+      "prompt": "Search your MidBrain memory for task example-task and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say \"not found after search\".",
+      "expected": "Reader recovers the hidden verification value written by Claude through MidBrain.",
+      "checks": [
+        {
+          "name": "reader made at least one MidBrain tool call",
+          "ok": false,
+          "detail": "calls=0"
+        }
+      ],
+      "evidence": [
+        "evidence/codex/s02-cross-client-recall/read-from-claude.json"
+      ],
+      "notes": "writer=claude, reader=codex; midbrain calls=0",
+      "blockedReason": null
+    }
+  ],
+  "isolation": { "ok": true, "drift": [] }
+}
+```
+
+A consumer can identify the client and scenario, select checks whose `ok` is false, and
+show their `name` and `detail` alongside the prompt and expected behavior. For `BLOCKED`
+cells, show `blockedReason`. The actual answer and tool inputs/results live in the referenced
+normalized turn; checks do not have universal `expected` and `actual` fields, and some
+`detail` strings are empty. Evidence supports investigation without assuming the failed
+assertion alone proves a root cause.
+
+| Required behavioral gate | System signal |
+|---|---|
+| Completed required matrix; every cell and underlying check passes; coverage, clean source/isolation, versions/models, bundle integrity and exact source/archive identity pass verification | GREEN |
+| A check fails, or a cell is BLOCKED, SKIP or FLAKY | RED, with the failed checks or blocking reason |
+| Results are missing, incomplete or invalid, or required coverage is absent | RED, with the missing evidence or coverage identified |
+| Bundle verification fails or the supplied source/archive differs from the tested candidate | RED, with the verification error |
+
+Preserve the original run failure even if evidence export succeeds. An interrupted run can
+have only `results.partial.json` or no results file; missing output must never become GREEN.
+A focused or simple run exiting 0 establishes only its selected checks, not the required gate.
+
+**Proposed decision format — not currently emitted:** a small wrapper could combine the
+verifier verdict, run identity, status counts and cell diagnostics into one versioned JSON
+object. These abbreviated examples show the intended interface for a dashboard or automation;
+production records should also bind the decision to the full source SHA and archive SHA-256.
+
+Passing example:
+
+```json
+{
+  "schemaVersion": 1,
+  "scope": "required_behavioral_suite",
+  "runId": "example-green-run",
+  "decision": "GREEN",
+  "complete": true,
+  "verificationPassed": true,
+  "problems": []
+}
+```
+
+Failing example:
+
+```json
+{
+  "schemaVersion": 1,
+  "scope": "required_behavioral_suite",
+  "runId": "example-red-run",
+  "decision": "RED",
+  "complete": true,
+  "verificationPassed": false,
+  "problems": [
+    {
+      "code": "CHECK_FAILED",
+      "client": "codex",
+      "scenario": "s02-cross-client-recall",
+      "check": "reader made at least one MidBrain tool call",
+      "detail": "calls=0",
+      "evidence": [
+        "evidence/codex/s02-cross-client-recall/read-from-claude.json"
+      ]
+    }
+  ]
+}
+```
+
+The proposed wrapper should also produce RED records for blocked dependencies, interrupted
+runs, invalid results and verification exceptions, using stable problem codes and redacted
+diagnostics. A failure to produce or parse the decision itself must block the gate. An AI
+may summarize these records or investigate evidence; the green/red decision comes from the
+deterministic checks and verifier. **Behavioral GREEN is one release requirement:**
+programmatic CI and Radu's release review remain separate requirements.
+
 
 ## Running it automatically
 
@@ -1109,12 +1458,14 @@ This is a dated checkpoint, not a live status dashboard:
 
 | Area | Implemented | Recorded validation as of 2026-09-10 |
 |---|---|---|
-| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,337 tests passed, 3 skipped, plus 224 copied-topology isolation checks. |
+| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,357 tests passed, 3 skipped, plus 232 copied-topology isolation checks. |
 | Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Approval driver checked in six fresh macOS homes without model calls; earlier opt-in full check passed 1,324 tests plus 224 isolation checks. Linux remains unvalidated. |
 | Five-client behavioral matrix | All adapters and scenarios described above | Completed broad run `20260909-083452-4fdd`: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate `6d6fc58`; `required: false`. It predates approval automation and simple mode. |
-| Simple cycle | Pair selection, labels, reports, export/CI support | Unit-tested; no recorded live simple matrix yet. |
+| Simple cycle | Pair selection, labels, reports, export/CI support | Run `20260910-082009-e52c`: 33m 52s at concurrency 3, 87 PASS / 7 FAIL, real-home isolation passed. |
 | Self-contained NanoClaw runtime | Local image preparation, embedded runner/assets/license, manifest and hash verification | Unit-tested; the local build attempt was blocked by an unreachable Docker daemon. No prepared-image behavioral run is validated. |
 | Release evidence | Selected redacted export and strict candidate verification | Export/verifier tests; no complete green required evidence for the intended current candidate. |
+| Pi (opt-in) | Native capture extension, MCP bridge, session driver | Standalone run `20260910-091532-e1d4`: 10 PASS; Pi/Claude run `20260910-091950-9fc3`: 20 PASS, including two-way recall; real homes unchanged. |
+| Model-check sweep | Six-prompt profile, two concurrent rounds, strict optional baseline reuse | 11m 36s at four workers, 113 PASS / 7 FAIL; infrastructure unverified. Eight-worker attempt blocked by API HTTP 401 before prompts. |
 | Manual GitHub workflow | Suite/model inputs, setup, execution, artifacts, cleanup | Built and statically checked; not deployed or run on a cloud runner. Slack alerts are not built. |
 
 Before calling the pipeline release-ready, triage those failures, validate Linux execution,

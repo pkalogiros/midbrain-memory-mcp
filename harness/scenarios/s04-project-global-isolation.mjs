@@ -5,10 +5,23 @@ import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } fro
 
 const askFor = (m) => `Search your MidBrain memory for the token ${m}. Report exactly one of: "found: <token>" or "not found after search". Do not guess.`;
 
+export async function prepareProjectIsolation(ctx, candidate, projB, key) {
+  if (ctx.meta.projBInstalled) return { code: 0 };
+  // Every client waits on the same installation before starting any project turn.
+  ctx.meta.projBInstallPromise ||= (async () => {
+    writeProjectKey(projB, key);
+    const result = await installCandidate(ctx, candidate, { cwd: projB, extraArgs: ['--project', projB], label: 'install-project-b' });
+    ctx.meta.projBInstalled = result.code === 0;
+    return result;
+  })();
+  return ctx.meta.projBInstallPromise;
+}
+
 export default {
   id: 's04-project-global-isolation',
   title: 'Global and project isolation',
   kind: 'single',
+  parallel: true,
   parity: true,
   rows: ['Project and global isolation'],
   async run({ ctx, api, client, project, candidate }) {
@@ -19,13 +32,9 @@ export default {
     }
     const projB = ctx.projectDir('proj-b');
     const projC = ctx.projectDir('proj-c');
-    if (!ctx.meta.projBInstalled) {
-      writeProjectKey(projB, key2);
-      const r = await installCandidate(ctx, candidate, { cwd: projB, extraArgs: ['--project', projB], label: 'install-project-b' });
-      ctx.meta.projBInstalled = r.code === 0;
-      if (r.code !== 0) {
-        return [cell({ row: 'Project and global isolation', scenario: this.id, client, expected, checks: [check('project install for proj-b succeeded', false, r.stderr.slice(-300))] })];
-      }
+    const installed = await prepareProjectIsolation(ctx, candidate, projB, key2);
+    if (installed.code !== 0) {
+      return [cell({ row: 'Project and global isolation', scenario: this.id, client, expected, checks: [check('project install for proj-b succeeded', false, installed.stderr.slice(-300))] })];
     }
     const api2 = new HarnessApi({ baseUrl: api.base, key: key2 });
     const mB = ctx.subMarker(client.id, 'isoB');
@@ -54,14 +63,17 @@ export default {
     await grace(ctx);
     const askAforB = await runTurn({ ctx, client, project, prompt: askFor(mB), scenarioId: this.id, label: 'ask-proj-a-for-b' });
     const askBforB = await runTurn({ ctx, client, project: projB, prompt: askFor(mB), scenarioId: this.id, label: 'ask-proj-b-for-b' });
-    const askCforA = await runTurn({ ctx, client, project: projC, prompt: askFor(mA), scenarioId: this.id, label: 'ask-proj-c-for-a' });
-    for (const t of [askAforB, askBforB, askCforA]) evidence.push(relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath));
+    // Simple mode omits the third ask: global recall from a directory that never saw the
+    // installer is required-only coverage; proj-a already proves global-credential recall.
+    const withFallback = !ctx.options?.simple;
+    const askCforA = withFallback ? await runTurn({ ctx, client, project: projC, prompt: askFor(mA), scenarioId: this.id, label: 'ask-proj-c-for-a' }) : null;
+    for (const t of [askAforB, askBforB, askCforA]) if (t) evidence.push(relEvidence(ctx, t.rawPath), relEvidence(ctx, t.jsonPath));
     // Retrieval = the STORED write memory surfaced, not the reader's own question (which
     // also contains the marker and gets captured, so a bare-token match false-positives).
     const storedPhrase = (m) => `marker for this session is ${m}`;
     const memHit = (t, m) => t.toolCalls.filter(isMidbrainTool).some((c) => resultText(c).includes(storedPhrase(m)) || resultText(c).split('\n').some((line) => line.includes(m) && !/search|token|not found/i.test(line)));
     const memAsked = (t, m) => t.toolCalls.filter(isMidbrainTool).some((c) => inputText(c).includes(m));
-    return [cell({ row: 'Project and global isolation', scenario: this.id, client, prompt: askFor('<marker>'), expected, evidence, notes: reuseA ? 'global-credential write reused from s01-capture (same project, credential and prompt)' : '', checks: [
+    return [cell({ row: 'Project and global isolation', scenario: this.id, client, prompt: askFor('<marker>'), expected, evidence, notes: [reuseA ? 'global-credential write reused from s01-capture (same project, credential and prompt)' : '', withFallback ? '' : 'simple mode: global-fallback ask from an uninstalled directory omitted (required-only)'].filter(Boolean).join('; '), checks: [
       check('proj-b marker stored under the project credential', rbB.user.length >= 1, `rows=${rbB.user.length}`),
       check('proj-a marker stored under the global credential', rbA.user.length >= 1, `rows=${rbA.user.length}`),
       check('proj-b marker is not present in the global credential store', !leakB.some((r) => String(r.text ?? '').includes(mB))),
@@ -71,7 +83,7 @@ export default {
       check('asking from proj-a (global) did not retrieve the proj-b marker', !memHit(askAforB, mB)),
       check('asking from proj-a answered not found', /not found after search/i.test(askAforB.finalText)),
       check('asking from proj-b retrieved the proj-b marker', memHit(askBforB, mB)),
-      check('asking from a global-only directory retrieved the proj-a marker (global fallback)', memHit(askCforA, mA)),
+      ...(withFallback ? [check('asking from a global-only directory retrieved the proj-a marker (global fallback)', memHit(askCforA, mA))] : []),
     ] })];
   },
 };

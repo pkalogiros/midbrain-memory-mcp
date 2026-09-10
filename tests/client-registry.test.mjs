@@ -58,7 +58,7 @@ describe("detectClients", () => {
   });
 
   it("registers Codex in allClients", () => {
-    expect(allClients().map((c) => c.id)).toEqual(["opencode", "claude", "codex", "nanoclaw", "hermes"]);
+    expect(allClients().map((c) => c.id)).toEqual(["opencode", "claude", "codex", "nanoclaw", "hermes", "pi"]);
   });
 
   it("returns Codex by id", () => {

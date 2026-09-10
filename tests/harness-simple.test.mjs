@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { clientPairs, selectManifests, ORDER } from '../harness/clients/index.mjs';
+import { clientPairs, selectManifests, DEFAULT_CLIENTS as ORDER } from '../harness/clients/index.mjs';
 import { renderMarkdown } from '../harness/lib/report.mjs';
 
 const ids = pairs => pairs.map(({ writer, reader }) => `${writer.id}->${reader.id}`);

@@ -101,6 +101,8 @@ export function childEnv(ctx, extra = {}) {
     TMP: ctx.dirs.tmp,
     CODEX_HOME: path.join(home, '.codex'),
     HERMES_HOME: path.join(home, '.hermes'),
+    PI_CODING_AGENT_DIR: path.join(home, '.pi', 'agent'),
+    PI_CODING_AGENT_SESSION_DIR: path.join(home, '.pi', 'agent', 'sessions'),
     npm_config_cache: path.join(home, '.npm'),
     MIDBRAIN_LOG_DIR: ctx.dirs.logs,
     MIDBRAIN_LOG_LEVEL: 'debug',

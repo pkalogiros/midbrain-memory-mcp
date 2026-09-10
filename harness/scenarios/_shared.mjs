@@ -30,11 +30,11 @@ export function markerPredicate(marker) {
 }
 
 /** Wait for rows carrying `marker`; returns rows split by role. */
-export async function readback(ctx, api, marker, { sinceIso, minUser = 1, minAssistant = 0 } = {}) {
+export async function readback(ctx, api, marker, { sinceIso, minUser = 1, minAssistant = 0, userText } = {}) {
   const res = await api.waitForRows({
     sinceIso,
     predicate: markerPredicate(marker),
-    ready: rows => rows.filter(r => r.role === 'user').length >= minUser && rows.filter(r => r.role === 'assistant').length >= minAssistant,
+    ready: rows => rows.filter(r => r.role === 'user').length >= minUser && rows.filter(r => r.role === 'assistant').length >= minAssistant && (!userText || rows.some(r => r.role === 'user' && rowText(r).includes(userText))),
     timeoutMs: ctx.options.readbackTimeoutMs,
     intervalMs: ctx.options.pollIntervalMs,
     settleMs: ctx.options.captureSettleMs ?? 5000,
@@ -86,8 +86,8 @@ export function sinceNow() {
   return new Date(Date.now() - 60000).toISOString();
 }
 
-export async function grace(ctx) {
-  const ms = ctx.options.indexGraceMs;
+export async function grace(ctx, readyAt) {
+  const ms = readyAt === undefined ? ctx.options.indexGraceMs : Math.max(0, readyAt - Date.now());
   if (ms > 0) await new Promise((r) => setTimeout(r, ms));
 }
 

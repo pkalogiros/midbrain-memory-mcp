@@ -22,6 +22,8 @@ import { whichSync, runSync } from './lib/proc.mjs';
 import { cell, blockedCells } from './scenarios/_shared.mjs';
 import { prepareRegistry } from './lib/registry.mjs';
 import { runUpgradePrelude } from './lib/upgrade.mjs';
+import { runJobs, parseConcurrency, scenarioConcurrency, scenarioResources } from './lib/scheduler.mjs';
+import { loadBaseline, validateBaseline, validateClientVersion, reusePreparedTools, followupScenarios, modelCheckOptions } from './lib/followup.mjs';
 
 const log = (msg) => console.error(`[harness ${new Date().toISOString().slice(11, 19)}] ${msg}`);
 
@@ -140,7 +142,13 @@ async function runScenario(sc, args, cells, creditClient) {
 }
 
 async function run(flags) {
+  flags = modelCheckOptions(flags);
+  const baseline = flags['follow-up'] === undefined ? null : loadBaseline(flags['follow-up']);
+  if (baseline) {
+    flags = { ...flags, clients: flags.clients ?? baseline.results.clients.map(c => c.id).join(',') };
+  }
   if (flags.simple && flags.required) throw new Error('--simple cannot be combined with --required; the required gate checks every ordered client pair');
+  const concurrency = parseConcurrency(flags.concurrency);
   loadDotEnv(path.join(HARNESS_DIR, '.env'));
   const secrets = collectSecrets();
   const key = secrets.MIDBRAIN_HARNESS_API_KEY;
@@ -163,8 +171,10 @@ async function run(flags) {
       keep: Boolean(flags.keep),
       required: Boolean(flags.required),
       simple: Boolean(flags.simple),
+      concurrency,
       interactive: Boolean(flags.interactive),
       upgrade,
+      modelChecks: Boolean(baseline || flags['model-checks']),
     },
   });
   ctx.secrets = secrets;
@@ -187,6 +197,15 @@ async function run(flags) {
   try {
   const candidate = await freezeCandidate({ mode, directory: path.join(ctx.dirs.run, 'candidate') });
   ctx.candidate = candidate;
+  const manifests = selectManifests(list(flags.clients));
+  const scenarios = selectScenarios(ctx.options.modelChecks ? followupScenarios() : list(flags.scenarios));
+  let followup = null;
+  if (baseline) {
+    const reusedChecks = validateBaseline(baseline.results, candidate, manifests, { apiBase: apiBaseUrl(), pk: process.env.MIDBRAIN_HARNESS_PK === '1' });
+    followup = { baselineRunId: baseline.results.run.runId, directory: baseline.dir, reportSha256: baseline.reportSha256, reusedChecks };
+    reusePreparedTools(ctx, baseline, manifests);
+    log(`follow-up: verified baseline ${followup.baselineRunId}; ${reusedChecks.length} infrastructure checks retained as prior evidence (not rerun)`);
+  }
   if (mode === 'registry') {
     log('starting loopback registry (verdaccio) …');
     await prepareRegistry(ctx, candidate, { publish: !upgrade });
@@ -198,8 +217,6 @@ async function run(flags) {
   const before = snapshot();
   ctx.writeJson(path.join(ctx.dirs.run, 'isolation-before.json'), before);
 
-  const manifests = selectManifests(list(flags.clients));
-  const scenarios = selectScenarios(list(flags.scenarios));
   const api = new HarnessApi({ baseUrl: apiBaseUrl(), key });
   const probe = await api.probe();
   if (!probe.ok) throw new Error(`MidBrain API probe failed: ${apiBaseUrl()} HTTP ${probe.status} ${probe.error || ''}`);
@@ -213,9 +230,11 @@ async function run(flags) {
       if (missing.length) throw new BlockedError(`missing secret(s): ${missing.join(', ')}`);
       await m.preflight(ctx);
       st.version = await m.version(ctx);
+      if (baseline) validateClientVersion(baseline.results, m.id, st.version);
       st.runnable = true;
     } catch (e) {
       st.blockedReason = e.message;
+      if (baseline) throw e; // An incompatible baseline must stop before model calls.
     }
     log(`client ${m.id}: ${st.runnable ? `ready (${st.version || 'version unknown'})` : `BLOCKED: ${st.blockedReason}`}`);
     clientStates.push(st);
@@ -282,7 +301,17 @@ async function run(flags) {
   const pairs = clientPairs(ctx.options.simple ? manifests : active, ctx.options.simple);
   const crossClientPairs = scenarios.some(sc => sc.kind === 'pair') ? pairs.map(({ writer, reader }) => ({ writer: writer.id, reader: reader.id })) : [];
   log(`cross-client coverage: ${ctx.options.simple ? 'simple cycle' : 'all ordered pairs'}; ${crossClientPairs.length} planned link(s)`);
+  log(`concurrency: ${concurrency}; cold capture, upgrade and client-specific scenarios remain serial`);
   for (const sc of scenarios) {
+    const jobs = [];
+    const enqueue = (args, creditClient) => jobs.push({
+      resources: scenarioResources(sc, args, ctx),
+      run: async () => {
+        const result = [];
+        await runScenario(sc, args, result, creditClient);
+        return result;
+      },
+    });
     if (sc.kind === 'pair') {
       if (pairs.length === 0) {
         for (const m of active) cells.push(...blockedCells(['Cross-client recall'], sc.id, m, 'fewer than two runnable clients in this run'));
@@ -293,17 +322,19 @@ async function run(flags) {
             cells.push(...blockedCells(sc.rows, sc.id, reader, `${unavailable.id}: ${unavailable.blockedReason}`, { notes: `writer=${writer.id}, reader=${reader.id}` }));
             continue;
           }
-          await runScenario(sc, { ctx, api, writer, reader, project: projA, candidate }, cells, reader);
+          enqueue({ ctx, api, writer, reader, project: projA, candidate }, reader);
         }
       }
       if (!ctx.options.simple || pairs.length === 0) for (const st of inactive) cells.push(...blockedCells(sc.rows, sc.id, st.manifest, st.blockedReason));
     } else {
       for (const st of clientStates) {
         if (!st.runnable) { cells.push(...blockedCells(sc.rows, sc.id, st.manifest, st.blockedReason)); continue; }
-        await runScenario(sc, { ctx, api, client: st.manifest, project: projA, candidate }, cells, st.manifest);
+        enqueue({ ctx, api, client: st.manifest, project: projA, candidate }, st.manifest);
       }
     }
-    ctx.writeJson(path.join(ctx.dirs.run, 'results.partial.json'), { run: { simple: ctx.options.simple, crossClientPairs }, cells });
+    const completed = await runJobs(jobs, scenarioConcurrency(sc, concurrency));
+    cells.push(...completed.flat());
+    ctx.writeJson(path.join(ctx.dirs.run, 'results.partial.json'), { run: { simple: ctx.options.simple, concurrency, crossClientPairs }, cells });
   }
 
   // Tool availability: prefer init/real tool calls; otherwise probe the client's
@@ -347,12 +378,19 @@ async function run(flags) {
     run: {
       required: ctx.options.required,
       simple: ctx.options.simple,
+      concurrency,
       crossClientPairs,
+      followup,
+      modelChecks: ctx.options.modelChecks,
+      promptCount: ctx.turns.length,
+      promptsByClient: Object.fromEntries(manifests.map(m => [m.id, ctx.turns.filter(t => t.client === m.id).length])),
+      toolPins: Object.fromEntries(manifests.map(m => [m.id, m.install.version || null])),
+      captureSettings: { pk: process.env.MIDBRAIN_HARNESS_PK === '1' },
       runId: ctx.runId, marker: ctx.marker, platform: ctx.platform, arch: ctx.arch, osRelease: ctx.osRelease, node: ctx.node,
       startedAt: ctx.startedAt, finishedAt: new Date().toISOString(),
       readbackTimeoutMs: ctx.options.readbackTimeoutMs, indexGraceMs: ctx.options.indexGraceMs,
       apiBase: apiBaseUrl(), runDir: ctx.dirs.run, cacheSpool: cacheSpoolCounts(ctx),
-      models: { opencode: process.env.MIDBRAIN_HARNESS_OPENCODE_MODEL || 'client default', hermes: MANIFESTS.hermes?.options?.model || process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5', claude: process.env.MIDBRAIN_HARNESS_CLAUDE_MODEL || 'client default', codex: process.env.MIDBRAIN_HARNESS_CODEX_MODEL || 'client default', nanoclaw: process.env.MIDBRAIN_HARNESS_NANOCLAW_MODEL || 'claude-sonnet-4-5' },
+      models: { pi: process.env.MIDBRAIN_HARNESS_PI_MODEL || 'claude-haiku-4-5', opencode: process.env.MIDBRAIN_HARNESS_OPENCODE_MODEL || 'client default', hermes: MANIFESTS.hermes?.options?.model || process.env.MIDBRAIN_HARNESS_HERMES_MODEL || 'claude-sonnet-4-5', claude: process.env.MIDBRAIN_HARNESS_CLAUDE_MODEL || 'client default', codex: process.env.MIDBRAIN_HARNESS_CODEX_MODEL || 'client default', nanoclaw: process.env.MIDBRAIN_HARNESS_NANOCLAW_MODEL || 'claude-sonnet-4-5' },
     },
     candidate,
     clients: clientStates.map(({ manifest: _m, ...rest }) => rest),
@@ -400,17 +438,28 @@ commands
   doctor   [--clients a,b]          readiness of this machine (clients, secrets, API, run root)
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
   run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --required] [--keep]
-           [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR]
+           [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR] [--concurrency N]
            [--interactive]
   report   <runDir>                 re-render report.md from results.json
+  sweep    --follow-up RUN --models FILE [--parallel-runs 1] [--concurrency 4]
+  sweep    --model-checks --models FILE [--parallel-runs 1] [--concurrency 4]
+
+--follow-up RUN: reuse a verified baseline's infrastructure evidence and prepared tools.
+                 Fresh homes and markers; six prompts per client with a cross-client cycle.
+                 Candidate, harness, client versions, API and capture settings must match.
+--model-checks: six-prompt model profile; infrastructure unverified, no baseline required.
 
 --simple: cross-client recall uses one directed cycle; other scenarios are unchanged.
           Without --simple, all ordered pairs run. Cannot combine with --required.
+--concurrency: 1–5 concurrent client jobs (default 1; try 3). Each client stays ordered.
+               Cold capture, upgrade and client-specific scenarios remain serial.
+               Sweeps accept a total budget of 1–10, capped at 5 per round.
 
 Native Codex hook approval is automatic for its S10 case (Python 3, Codex 0.150.1, Linux/macOS).
 Use --interactive for manual terminal approval instead. --approve-codex-hooks is accepted for compatibility but no longer needed.
 
 clients:   ${ORDER.join(', ')}
+           Pi is opt-in with --clients pi (or a comma-separated list).
 scenarios: ${SCENARIOS.map((s) => s.id).join(', ')}
 
 secrets (harness/.env or environment): MIDBRAIN_HARNESS_API_KEY, MIDBRAIN_HARNESS_PROJECT_API_KEY (optional),
@@ -420,6 +469,11 @@ secrets (harness/.env or environment): MIDBRAIN_HARNESS_API_KEY, MIDBRAIN_HARNES
 
 const { cmd, flags } = parseArgs(process.argv.slice(2));
 const commands = { doctor, freeze, run, report, help };
+commands.sweep = async flags => {
+  loadDotEnv(path.join(HARNESS_DIR, '.env'));
+  const { runSweep } = await import('./lib/sweep.mjs');
+  await runSweep(flags);
+};
 const fn = commands[cmd || 'help'];
 if (!fn) { help(); process.exitCode = 2; }
 else {

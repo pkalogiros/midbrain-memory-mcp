@@ -6,9 +6,25 @@ export default {
   id: 's03-fresh-session-continuity',
   title: 'Fresh-session continuity',
   kind: 'single',
+  parallel: true,
   parity: true,
   rows: ['Fresh-session continuity', 'Rule and priming compliance'],
   async run({ ctx, api, client, project }) {
+    const seed = ctx.options.modelChecks ? ctx.meta.s02Writes?.[client.id] : null;
+    if (seed) {
+      const { m, value, wTurn, rb, readyAt } = seed;
+      if (!rb.user.length) return [cell({ row: 'Fresh-session continuity', scenario: this.id, client, checks: [check('checkpoint captured', false)] })];
+      await grace(ctx, readyAt);
+      const prompt = `Search MidBrain for task ${m} and return its exact verification value. Do not guess.`;
+      const recall = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'session-fresh' });
+      const evidence = [relEvidence(ctx, wTurn.jsonPath), relEvidence(ctx, recall.jsonPath)];
+      return [
+        cell({ row: 'Fresh-session continuity', scenario: this.id, client, prompt, evidence,
+          expected: 'A new session recovers the hidden checkpoint value through MidBrain.', notes: 'Follow-up: checkpoint written by this client during this run’s capture check.',
+          checks: [...turnChecks(recall), check('fresh native session', Boolean(recall.sessionId && wTurn.sessionId && recall.sessionId !== wTurn.sessionId)), ...recallChecks(recall, m, [value])] }),
+        cell({ row: 'Rule and priming compliance', scenario: this.id, client, prompt, evidence, checks: complianceChecks(recall, m) }),
+      ];
+    }
     // Simple mode: the upgrade prelude already wrote a checkpoint in one session and recalled it
     // from a fresh session on the candidate, which is this scenario's claim. Score those turns.
     const pre = ctx.options?.simple ? ctx.meta?.upgradeTurns?.[client.id] : null;

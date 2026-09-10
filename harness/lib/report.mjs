@@ -50,7 +50,14 @@ export function renderMarkdown(results) {
   lines.push('');
   lines.push('| Field | Value |');
   lines.push('|---|---|');
-  lines.push(`| Run type | ${run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
+  lines.push(`| Run type | ${run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
+  if (run.followup) {
+    lines.push(`| Verified baseline | ${esc(run.followup.baselineRunId)}; results SHA-256 ${esc(run.followup.reportSha256)} |`);
+    lines.push('| Prior evidence | Project isolation, upgrade and client-specific checks were verified in the baseline, not rerun or counted as new passes. |');
+  }
+  if (run.modelChecks && !run.followup) lines.push('| Coverage limit | Project isolation, upgrade and client-specific cases were not run or verified. This report cannot serve as a baseline or release sign-off. |');
+  if (run.promptCount !== undefined) lines.push(`| New prompts | ${run.promptCount}; ${Object.entries(run.promptsByClient || {}).map(([id, n]) => `${id}=${n}`).join(', ')} |`);
+  lines.push(`| Client concurrency | ${run.concurrency ?? 1} (cold capture, upgrade and client-specific scenarios serial) |`);
   if (run.crossClientPairs) lines.push(`| Planned cross-client links | ${run.crossClientPairs.map(p => `${esc(p.writer)} → ${esc(p.reader)}`).join(', ') || 'None selected'} |`);
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
   if (candidate.pack && !candidate.pack.error) lines.push(`| Source archive | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);

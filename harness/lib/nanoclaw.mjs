@@ -126,7 +126,7 @@ export class NanoClawRuntime {
 
   async prepareSourceImage() {
     mkdirSync(this.root, { recursive: true });
-    const source = process.env.MIDBRAIN_HARNESS_NANOCLAW_SOURCE;
+    const source = process.env.MIDBRAIN_HARNESS_NANOCLAW_SOURCE || this.ctx.meta.preparedNanoSource;
     const checkout = path.join(this.ctx.dirs.tools, 'nanoclaw-checkout');
     if (!source) {
       const env = childEnv(this.ctx);
@@ -151,7 +151,7 @@ export class NanoClawRuntime {
     }
     mkdirSync(path.join(this.root, '.claude/skills'), { recursive: true });
     const lockHash = hash(path.join(this.root, 'container/agent-runner/bun.lock'));
-    const baseTag = process.env.MIDBRAIN_HARNESS_NANOCLAW_IMAGE || 'midbrain-harness-nanoclaw:' + NANOCLAW_SHA.slice(0, 12);
+    const baseTag = process.env.MIDBRAIN_HARNESS_NANOCLAW_IMAGE || this.ctx.meta.preparedNanoImage || 'midbrain-harness-nanoclaw:' + NANOCLAW_SHA.slice(0, 12);
     let inspected = await this.docker(['image', 'inspect', baseTag]);
     if (inspected.code !== 0) {
       if (process.env.MIDBRAIN_HARNESS_NANOCLAW_IMAGE) throw new BlockedError('Configured NanoClaw image is not available locally');

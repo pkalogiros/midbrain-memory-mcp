@@ -72,6 +72,10 @@ export async function freezeCandidate({ mode = 'dev', directory } = {}) {
     pack: { ...pack, files: pack.files.map(f => f.path) },
     harness: { directory: harnessDir, files: harnessFiles }, frozenAt: new Date().toISOString(),
   };
+  // Registry mode may rewrite the runtime package version to an rc; preserve
+  // the packed source identity independently for follow-up compatibility.
+  candidate.sourceFiles = { ...candidate.files };
+  candidate.sourceTarballSha256 = candidate.tarballSha256;
   writeFileSync(path.join(dir, 'identity.json'), JSON.stringify(candidate, null, 2) + '\n');
   return candidate;
 }

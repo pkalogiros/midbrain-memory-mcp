@@ -205,3 +205,65 @@ it('S3 in simple mode is scored on the upgrade prelude turns instead of two more
   const full = { ...ctx, options: { simple: false, indexGraceMs: 0 } };
   await expect(s03.run({ ctx: full, api: {}, client, project: os.tmpdir() })).rejects.toThrow('must not spend');
 });
+
+it('simple mode trims S4 to three asks and skips required-only client cases', async () => {
+  const { default: s04 } = await import('../harness/scenarios/s04-project-global-isolation.mjs');
+  const { default: s10 } = await import('../harness/scenarios/s10-client-specific.mjs');
+  const { HarnessApi } = await import('../harness/lib/api.mjs');
+  const path = await import('node:path');
+  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+  const root = mkdtempSync(path.join(os.tmpdir(), 's04-simple-'));
+  const project = path.join(root, 'proj-a'); for (const p of ['proj-a', 'proj-b', 'proj-c']) mkdirSync(path.join(root, p));
+  const rows = [{ role: 'user', text: 'marker for this session is MBH-s1' }];
+  const rb = { rows, user: rows, assistant: [], elapsedMs: 1, polls: 1, timedOut: false, lastError: null };
+  const ctx = { dirs: { run: root, home: root, logs: root }, options: { indexGraceMs: 0, simple: true }, turns: [], secrets: { MIDBRAIN_HARNESS_PROJECT_API_KEY: 'k2' },
+    meta: { projBInstalled: true, captureEvidence: { codex: { marker: 'MBH-s1', since: '2026-09-10T00:00:00.000Z', project, rb, evidence: [] } } },
+    projectDir: (n) => path.join(root, n), evidenceDir: () => root, writeJson() {}, subMarker: (id, s) => `MBH-${id}-${s}` };
+  const prompts = [];
+  const client = { id: 'codex', expectedCaptureLabel: 'codex', specific: ['hook-trust-persisted'], runTurn: async ({ prompt }) => { prompts.push(prompt); return { prompt, finalText: 'not found after search', exitCode: 0, timedOut: false, isError: false, toolCalls: [], rawPath: path.join(root, 't'), jsonPath: path.join(root, 't.json') }; } };
+  const api = { base: 'http://unused', listEpisodicSince: async () => [], waitForRows: async () => ({ rows, elapsedMs: 1, polls: 1, timedOut: false, lastError: null }) };
+  const spies = [vi.spyOn(HarnessApi.prototype, 'listEpisodicSince').mockResolvedValue([]), vi.spyOn(HarnessApi.prototype, 'waitForRows').mockResolvedValue({ rows, elapsedMs: 1, polls: 1, timedOut: false, lastError: null })];
+  try {
+    const [cellA] = await s04.run({ ctx, api, client, project, candidate: {} });
+    expect(prompts).toHaveLength(3); // write-proj-b + two asks
+    expect(cellA.notes).toContain('required-only');
+    expect(cellA.checks.some(c => /global fallback/.test(c.name))).toBe(false);
+    expect(await s10.run({ ctx, api, client, project, candidate: {} })).toEqual([]);
+    ctx.options.simple = false;
+    await expect(s10.run({ ctx, api, client, project, candidate: {} })).resolves.not.toEqual([]);
+  } finally { spies.forEach(s => s.mockRestore()); rmSync(root, { recursive: true, force: true }); }
+});
+
+it('simple mode builds S5 on the client S2 checkpoint and trims the OpenCode and Hermes cases', async () => {
+  const { default: s05 } = await import('../harness/scenarios/s05-freshness-reconciliation.mjs');
+  const { default: s10 } = await import('../harness/scenarios/s10-client-specific.mjs');
+  const path = await import('node:path');
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'simple-trim-'));
+  const project = path.join(root, 'proj-a'); mkdirSync(project);
+  mkdirSync(path.join(root, '.hermes')); mkdirSync(path.join(root, '.config/opencode'), { recursive: true });
+  writeFileSync(path.join(root, '.config/opencode/opencode.jsonc'), '{ "mcp": { "midbrain-memory": { "enabled": true } } }');
+  const turn = (prompt, extra = {}) => ({ prompt, finalText: '{"current":"VALUE-new","evidence":"update"}', exitCode: 0, timedOut: false, isError: false, toolCalls: [], rawPath: path.join(root, 't'), jsonPath: path.join(root, 't.json'), captureCwd: '~/proj-a', sessionId: 'sess', ...extra });
+  const rows = [{ role: 'user', text: 'Checkpoint for task MBH-w: VALUE-old', memory_metadata: { client: 'hermes', session_id: 'sess', cwd: '~/proj-a' } }, { role: 'assistant', text: 'ok MBH-w', memory_metadata: { client: 'hermes', session_id: 'sess', cwd: '~/proj-a' } }];
+  const rb = { rows, user: [rows[0]], assistant: [rows[1]], elapsedMs: 1, polls: 1, timedOut: false, lastError: null };
+  const prompts = [];
+  const mk = (id) => ({ id, expectedCaptureLabel: id, specific: id === 'hermes' ? ['hook-acceptance'] : ['plugin-process-separation'],
+    runTurn: async ({ prompt }) => { prompts.push(prompt); return turn(prompt, prompt.includes('Reply with exactly') ? { finalText: 'x' } : { toolCalls: [{ name: 'midbrain__memory_search', input: { query: 'MBH-w' }, result: 'VALUE-new is current', ok: true }] }); } });
+  const base = { dirs: { run: root, home: root, logs: root }, options: { indexGraceMs: 0, simple: true }, turns: [], evidenceDir: () => root, writeJson() {}, subMarker: (id, s) => `MBH-${id}-${s}` };
+  const api = { waitForRows: async () => ({ rows: rows.concat(rows), elapsedMs: 1, polls: 1, timedOut: true, lastError: null }) };
+  try {
+    const ctx = { ...base, meta: { s02Writes: { hermes: { m: 'MBH-w', value: 'VALUE-old', wTurn: turn('w'), rb, since: '2026-09-10T00:00:00.000Z' } }, captureEvidence: { hermes: { turn: turn('s1'), rb, evidence: ['e'] } } } };
+    const cells = await s05.run({ ctx, api, client: mk('hermes'), project });
+    expect(prompts.filter(p => p.startsWith('Note for task'))).toHaveLength(0);
+    expect(prompts.filter(p => p.startsWith('Update for task MBH-w'))).toHaveLength(1);
+    expect(cells[0].notes).toContain('S2 checkpoint');
+    prompts.length = 0;
+    const hermesCells = await s10.run({ ctx, api, client: mk('hermes'), project, candidate: {} });
+    expect(prompts).toHaveLength(1); // only the unapproved turn
+    expect(hermesCells[0].notes).toContain('derived from s01-capture');
+    prompts.length = 0;
+    const ocCells = await s10.run({ ctx, api, client: mk('opencode'), project, candidate: {} });
+    expect(prompts).toHaveLength(1); // capture only, no MCP recall turn
+    expect(ocCells[0].notes).toContain('required-only');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

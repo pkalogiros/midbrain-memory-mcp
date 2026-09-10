@@ -19,3 +19,11 @@ await build({
     __MIDBRAIN_PACKAGE_VERSION__: JSON.stringify(packageJson.version),
   },
 });
+
+// Pi loads this self-contained runtime from its owned extension directory.
+await build({
+  entryPoints: [path.join(repoRoot, 'plugins', 'pi', 'extension.mjs')],
+  bundle: true, format: 'esm', platform: 'node',
+  outfile: path.join(repoRoot, 'dist', 'midbrain-pi.mjs'),
+  banner: { js: "import { createRequire as midbrainCreateRequire } from 'node:module'; const require = midbrainCreateRequire(import.meta.url);" },
+});

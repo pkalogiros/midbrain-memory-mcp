@@ -6,6 +6,7 @@ export default {
   id: 's02-cross-client-recall',
   title: 'Cross-client recall',
   kind: 'pair',
+  parallel: true,
   parity: true,
   rows: ['Cross-client recall', 'Rule and priming compliance'],
   async run({ ctx, api, writer, reader, project }) {
@@ -22,7 +23,7 @@ export default {
       const since = sinceNow();
       const wTurn = await runTurn({ ctx, client: writer, project, prompt: writePrompt, scenarioId: this.id, label: 'write' });
       const rb = await readback(ctx, api, m, { sinceIso: since, minUser: 1 });
-      shared = ctx.meta.s02Writes[writer.id] = { m, value, wTurn, rb, readers: 0 };
+      shared = ctx.meta.s02Writes[writer.id] = { m, value, wTurn, rb, since, readers: 0 };
     }
     shared.readers += 1;
     const { m, value, wTurn, rb } = shared;
@@ -35,6 +36,7 @@ export default {
         checks: [check(`writer ${writer.id} user row reached the API`, false, `rows=${rb.rows.length}`)] })];
     }
     if (fresh) await grace(ctx); // indexing grace once per shared write
+    else if (shared.readyAt) await grace(ctx, shared.readyAt);
     const rTurn = await runTurn({ ctx, client: reader, project, prompt: readPrompt, scenarioId: this.id, label: `read-from-${writer.id}` });
     evidence.push(relEvidence(ctx, rTurn.rawPath), relEvidence(ctx, rTurn.jsonPath));
     const memCalls = rTurn.toolCalls.filter(isMidbrainTool);

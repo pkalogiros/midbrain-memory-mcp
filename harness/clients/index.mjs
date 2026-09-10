@@ -3,9 +3,11 @@ import codex from './codex.mjs';
 import opencode from './opencode.mjs';
 import hermes from './hermes.mjs';
 import nanoclaw from './nanoclaw.mjs';
+import pi from './pi.mjs';
 
-export const MANIFESTS = { opencode, claude, codex, hermes, nanoclaw };
-export const ORDER = ['opencode', 'claude', 'codex', 'hermes', 'nanoclaw'];
+export const MANIFESTS = { opencode, claude, codex, hermes, nanoclaw, pi };
+export const DEFAULT_CLIENTS = ['opencode', 'claude', 'codex', 'hermes', 'nanoclaw'];
+export const ORDER = [...DEFAULT_CLIENTS, 'pi'];
 
 // Keep the supplied order: selectManifests establishes a reproducible client order.
 export function clientPairs(clients, simple = false) {
@@ -15,7 +17,7 @@ export function clientPairs(clients, simple = false) {
 }
 
 export function selectManifests(ids) {
-  const wanted = ids && ids.length ? ids : ORDER;
+  const wanted = ids && ids.length ? ids : DEFAULT_CLIENTS;
   const unknown = wanted.filter((id) => !MANIFESTS[id]);
   if (unknown.length) throw new Error(`unknown client id(s): ${unknown.join(', ')} (known: ${ORDER.join(', ')})`);
   return ORDER.filter((id) => wanted.includes(id)).map((id) => MANIFESTS[id]);

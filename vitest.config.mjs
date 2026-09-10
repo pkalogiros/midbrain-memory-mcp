@@ -13,6 +13,7 @@ export default defineConfig({
     env: {
       HERMES_HOME: '/nonexistent/midbrain-poison/hermes',
       NANOCLAW_HOME: '/nonexistent/midbrain-poison/nanoclaw',
+      PI_CODING_AGENT_DIR: '/nonexistent/midbrain-poison/pi',
     },
     setupFiles: ['./tests/helpers/scrub-env.mjs'],
   },
