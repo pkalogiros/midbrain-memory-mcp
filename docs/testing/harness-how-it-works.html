@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="A complete offline guide to MidBrain multi-client testing: architecture, source map, setup, execution, results and release evidence."><title>MidBrain · Multi-client testing guide</title><style>
+:root{--ink:#183b34;--body:#334840;--muted:#65776e;--line:#dce3db;--paper:#fffefa;--page:#f4f4ed;--accent:#1d6d55;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:32px}body{margin:0;background:var(--page);color:var(--body);font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-decoration-color:#9fbead;text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,button:focus-visible,[tabindex]:focus-visible,summary:focus-visible{outline:3px solid #be8833;outline-offset:4px}.skip{position:fixed;left:12px;top:-80px;padding:10px;background:white;z-index:30}.skip:focus{top:12px}.layout{max-width:1530px;margin:auto;display:grid;grid-template-columns:265px minmax(0,1fr);gap:52px;padding:36px 48px 80px}.sidebar{position:sticky;top:28px;align-self:start;max-height:calc(100vh - 56px);overflow:auto;padding:8px 18px 16px 0}.brand{font-size:14px;font-weight:750;letter-spacing:.16em;color:var(--ink);margin-bottom:4px}.edition{font-size:12px;color:var(--muted);margin-bottom:26px}.sidebar summary{font-weight:650;font-size:13px;list-style:none;letter-spacing:.06em;text-transform:uppercase;margin-bottom:14px}.sidebar nav{display:grid;gap:4px}.sidebar nav a{color:var(--muted);font-size:13px;line-height:1.5;padding:7px 12px;border-left:2px solid transparent;text-decoration:none}.sidebar nav a:hover,.sidebar nav a.active{color:var(--ink);border-color:var(--accent);background:#e7eee4}.offline{border-top:1px solid var(--line);margin-top:25px;padding-top:18px;font-size:12px;color:var(--muted)}.print{border:1px solid #b9cabe;border-radius:5px;background:transparent;color:var(--ink);padding:8px 12px;font:inherit;font-size:12px;cursor:pointer;margin-top:12px}.main{min-width:0;max-width:1080px}.hero{padding:27px 0 34px;border-bottom:1px solid #b9cbbb;margin-bottom:30px}.eyebrow{color:var(--accent);text-transform:uppercase;letter-spacing:.15em;font-size:12px;font-weight:700}.hero h1{font:600 clamp(34px,4.3vw,61px)/1.08 Georgia,serif;color:var(--ink);letter-spacing:-.035em;max-width:850px;margin:20px 0}.hero .deck{font-size:19px;line-height:1.65;color:#5b7164;max-width:770px}.tags{display:flex;flex-wrap:wrap;gap:9px;margin-top:22px}.tag{font-size:12px;line-height:1.4;padding:7px 11px;background:#e5eee3;border:1px solid #c8d9c6;border-radius:4px}.tag.pending{background:#fff1d6;border-color:#e7cf97;color:#715019}article h2{font:600 32px/1.2 Georgia,serif;letter-spacing:-.02em;color:var(--ink);margin:64px 0 20px;padding-top:22px;border-top:1px solid var(--line)}article h3{font-size:20px;line-height:1.4;color:var(--ink);margin:34px 0 13px}article p{margin:0 0 18px}article ul,article ol{padding-left:24px;margin:18px 0 25px}article li{padding-left:4px;margin:10px 0}strong{color:var(--ink);font-weight:650}code{font-family:var(--mono);font-size:.84em;background:#eaf0e6;padding:2px 5px;border-radius:3px;overflow-wrap:anywhere}pre{background:#173b33;color:#e8f2e6;border-radius:9px;padding:24px;overflow:auto;line-height:1.65;font-size:13px;margin:22px 0}pre code{font-size:inherit;background:none;padding:0;color:inherit;overflow-wrap:normal}.code-block{position:relative}.code-block pre{padding-top:48px}.copy{position:absolute;right:12px;top:10px;border:1px solid #6b8878;color:#deebdf;background:#244a40;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer}.copy:hover{background:#365e4e}.table-scroll{overflow:auto;margin:24px 0;border:1px solid var(--line);border-radius:8px;background:var(--paper)}table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.65}th{text-align:left;color:var(--ink);font-size:12px;letter-spacing:.035em;background:#e9eee4}td,th{padding:14px 16px;vertical-align:top;border-bottom:1px solid var(--line)}tr:last-child td{border-bottom:0}td:first-child{min-width:160px}td code{font-size:12px}tbody tr:nth-child(even){background:#f8faf5}.diagram{margin:28px 0;background:var(--paper);border:1px solid #c9d8cc;border-radius:12px;overflow:hidden}.diagram-scroll{overflow:auto;padding:18px 12px}.diagram svg{display:block;width:100%;min-width:760px;height:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}figcaption{padding:12px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;background:#eff3e9}.repo-ref{text-decoration-style:dotted}.references dl{border:1px solid var(--line);border-radius:8px;background:#fffefa}.references dl>div{padding:12px 18px;border-bottom:1px solid var(--line);scroll-margin-top:30px}.references dl>div:last-child{border:0}.references dt{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.references dd{margin:4px 0;font-size:13px}.references dl>div:target{background:#fff1d6}.footer{margin-top:48px;padding-top:24px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.copy-status{position:fixed;bottom:20px;right:20px;background:var(--ink);color:white;border-radius:6px;padding:9px 15px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .15s}.copy-status.visible{opacity:1}
+@media(min-width:1100px){article>p,article>ol,article>ul{max-width:920px}}
+@media(max-width:1000px){.layout{grid-template-columns:205px minmax(0,1fr);gap:26px;padding:24px}.sidebar nav a{font-size:12px;padding:7px}.hero h1{font-size:43px}}
+@media(max-width:760px){.layout{display:block;padding:20px 18px 50px}.sidebar{position:static;max-height:none;border-bottom:1px solid var(--line);padding:0 0 15px}.brand{font-size:12px}.edition{margin-bottom:12px}.sidebar summary{cursor:pointer;margin-bottom:6px}.sidebar nav{grid-template-columns:1fr 1fr}.offline{display:none}.hero{padding-top:28px}.hero h1{font-size:38px}.hero .deck{font-size:17px}article h2{font-size:28px;margin-top:43px}article h3{font-size:19px}body{font-size:15px}.diagram-scroll{padding:10px}.table-scroll table{min-width:600px}pre{padding:18px;font-size:12px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.copy-status{transition:none}}
+@media print{@page{margin:16mm}body{background:white;color:#222;font-size:10pt;line-height:1.55}.layout{display:block;padding:0}.sidebar,.skip,.copy,.copy-status{display:none}.main{max-width:none}.hero{padding:0 0 20px}.hero h1{font-size:32pt}.hero .deck{font-size:12pt}.hero .tags{margin-top:10px}article h2{font-size:22pt;margin-top:30px;break-after:avoid}article h3{font-size:14pt;break-after:avoid}.table-scroll{overflow:visible}table{font-size:9pt}td,th{padding:8px;min-width:0!important}.diagram{break-inside:avoid}.diagram-scroll{overflow:visible}.diagram svg{min-width:0}.diagram figcaption{font-size:8pt}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4ef;color:#173b33;font-size:8pt;border:1px solid #c9d8cc;break-inside:avoid}a{color:inherit}tr{break-inside:avoid}.references{break-before:page}}
+</style></head>
+<body><a class="skip" href="#content">Skip to guide</a><div class="layout"><aside class="sidebar" aria-label="Guide navigation"><div class="brand">MIDBRAIN / ENGINEERING</div><div class="edition">Operator guide · 09 September 2026</div><details class="toc" open><summary>On this page</summary><nav aria-label="Table of contents"><a href="#what-it-is">What it is</a><a href="#architecture">Architecture</a><a href="#one-run-step-by-step">One run, step by step</a><a href="#what-each-file-does">What each file does</a><a href="#what-a-run-leaves-behind">What a run leaves behind</a><a href="#local-setup">Local setup</a><a href="#choose-and-run-a-suite">Choose and run a suite</a><a href="#how-to-read-and-parse-results">How to read and parse results</a><a href="#export-and-verify-release-evidence">Export and verify release evidence</a><a href="#running-it-automatically">Running it automatically</a><a href="#what-is-validated-and-what-remains">What is validated and what remains</a><a href="#repository-references">Repository references</a></nav></details><div class="offline">One file. Works offline.<br>All styles, diagrams and controls are embedded.<br><button class="print" type="button">Print / Save PDF</button></div></aside><main class="main" id="content"><header class="hero"><div class="eyebrow">Architecture &amp; operations</div><h1>Multi-client testing,<br>from session to evidence.</h1><p class="deck">What we built, where it lives, why it works this way — and how to run it, investigate failures and review a release.</p><div class="tags"><span class="tag">5 real clients</span><span class="tag">Smoke / Simple / Required</span><span class="tag">Offline reference</span><span class="tag pending">Full required sign-off pending</span></div></header><article>
+<p>Companion to the <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design and coverage map</a>,
+<a class="repo-ref" href="#source-2" title="Repository reference: harness/README.md">CLI commands</a>, and <a class="repo-ref" href="#source-3" title="Repository reference: docs/testing/behavioral-ci.md">workflow setup</a>.
+Updated 2026-09-09 against branch <code>multi-client-test-harness</code>.</p>
+<p>Start with <a href="#architecture">architecture</a> to understand the system, <a href="#local-setup">local setup</a>
+to prepare a machine, <a href="#choose-and-run-a-suite">run recipes</a> to execute it, or
+<a href="#how-to-read-and-parse-results">reading results</a> to investigate an existing run.</p>
+<h2 id="what-it-is">What it is</h2>
+<p>The harness tests a release candidate of <code>midbrain-memory-mcp</code> against defined checks in five
+real AI clients: OpenCode, Claude Code, Codex, Hermes and NanoClaw. Behavioral runs use real
+models, product hooks and the MidBrain API, with controlled fixtures and a local NanoClaw
+mailbox transport. Unit tests separately mock dependencies to test harness logic.</p>
+<p>It builds the candidate into a tarball, lets the product's own installer configure real client
+installs inside a throwaway home, drives real model sessions with fixed prompts, and scores
+what actually happened from raw evidence: rows read back from the MidBrain API, tool calls in
+the client's own transcript, and the product's hook logs. The result is one side-by-side
+PASS / FAIL / BLOCKED matrix per run. Implemented scenarios are not proof of a passing
+release: the complete required matrix still needs to pass on the intended candidate.</p>
+<p>NanoClaw coverage uses its upstream runner through the local mailbox; external messaging
+integrations and the full host dispatcher are not exercised.</p>
+<h2 id="architecture">Architecture</h2>
+<p>There are two complementary test lanes. The existing programmatic suite checks installation,
+configuration, credentials, tools, repair, recovery, packaging and isolation in code. Its
+<a class="repo-ref" href="#source-4" title="Repository reference: .github/workflows/ci.yml">CI workflow</a> runs tests on Linux, macOS and Windows.
+The behavioral harness checks whether real clients actually capture and use memory in
+model sessions. A green programmatic suite does not establish a green behavioral matrix.</p>
+<figure class="diagram"><div aria-label="Scrollable architecture diagram" class="diagram-scroll" role="group" tabindex="0"><svg aria-labelledby="architecture-title architecture-desc" role="img" viewbox="0 0 1080 1020" xmlns="http://www.w3.org/2000/svg"><title id="architecture-title">Two test lanes, one release candidate</title><desc id="architecture-desc">The programmatic lane runs across operating systems. The behavioral lane installs a frozen candidate into an isolated home, runs native clients and NanoClaw against real providers and a test memory API, and scores evidence for export.</desc><defs><marker id="architecture-arrow" markerheight="7" markerwidth="7" orient="auto-start-reverse" refx="9" refy="5" viewbox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 z" fill="#47756e"></path></marker></defs><rect fill="#f4f7f2" height="585" rx="18" stroke="#bdcec1" stroke-dasharray="6 5" width="710" x="345" y="325"></rect><text fill="#173c36" font-size="14" font-weight="700" text-anchor="end" x="1030" y="350">PRIVATE RUN DIRECTORY · ONE MACHINE</text><path d="M 535 80 V 125" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 385 50 H 170 V 125" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 170 200 V 230" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 535 200 V 230" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 535 305 V 370" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 535 435 V 470" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 695 402 H 875 V 470" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 310 510 H 385" fill="none" marker-end="url(#architecture-arrow)" marker-start="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="348" y="496">Model calls</text><path d="M 170 550 V 565 H 1040 V 510 H 1015" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 535 550 V 580 H 680 V 600" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 875 550 V 580 H 680" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 550 632 H 310" fill="none" marker-end="url(#architecture-arrow)" marker-start="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="430" y="620">Capture / recall</text><path d="M 170 670 V 735 H 385" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="270" y="720">Read-only verification</text><path d="M 680 670 V 690 H 535 V 705" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 535 775 V 810" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 695 845 H 735" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 875 885 V 940" fill="none" marker-end="url(#architecture-arrow)" stroke="#47756e" stroke-width="2"></path><rect fill="#163f36" height="60" rx="12" stroke="#163f36" width="300" x="385" y="20"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="56.0">Candidate checkout</text><rect fill="#edf6f1" height="75" rx="12" stroke="#95b7ab" width="270" x="35" y="125"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="170.0" y="156.5">Programmatic tests</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="170.0" y="181.5">tests/</text><rect fill="#edf6f1" height="75" rx="12" stroke="#95b7ab" width="270" x="35" y="230"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="170.0" y="261.5">CI OS matrix</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="170.0" y="286.5">Linux · macOS · Windows</text><rect fill="#edf6f1" height="75" rx="12" stroke="#95b7ab" width="300" x="385" y="125"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="156.5">Freeze candidate</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="181.5">Package + harness hashes</text><rect fill="#edf6f1" height="75" rx="12" stroke="#95b7ab" width="300" x="385" y="230"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="261.5">Product installer</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="286.5">Real install / upgrade</text><rect fill="#edf6f1" height="65" rx="12" stroke="#95b7ab" width="310" x="385" y="370"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="408.5">Isolated home + projects</text><rect fill="#edf6f1" height="80" rx="12" stroke="#95b7ab" width="310" x="385" y="470"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="492.0">Native client sessions</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="517.0">OpenCode · Claude</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="542.0">Codex · Hermes</text><rect fill="#edf6f1" height="80" rx="12" stroke="#95b7ab" width="280" x="735" y="470"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="875.0" y="504.0">NanoClaw in Docker</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="875.0" y="529.0">Pinned upstream runner</text><rect fill="#fff3db" height="80" rx="12" stroke="#d6b96d" width="275" x="35" y="470"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="172.5" y="504.0">Model provider APIs</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="172.5" y="529.0">Anthropic / OpenAI</text><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="310" x="550" y="600"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="705.0" y="629.0">Candidate product</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="705.0" y="654.0">MCP server + capture hooks</text><rect fill="#fff3db" height="70" rx="12" stroke="#d6b96d" width="275" x="35" y="600"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="172.5" y="629.0">Dedicated MidBrain API</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="172.5" y="654.0">Local or staging</text><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="310" x="385" y="705"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="734.0">Saved evidence</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="759.0">Prompts · turns · API readback</text><rect fill="#163f36" height="75" rx="12" stroke="#163f36" width="310" x="385" y="810"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="841.5">Deterministic checks</text><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="540.0" y="866.5">results.json + report.md</text><rect fill="#edf6f1" height="75" rx="12" stroke="#95b7ab" width="280" x="735" y="810"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="875.0" y="841.5">Select + redact</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="875.0" y="866.5">Shareable evidence bundle</text><rect fill="#163f36" height="60" rx="12" stroke="#163f36" width="280" x="735" y="940"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="875.0" y="976.0">Release verification</text><text fill="#173c36" font-size="16" font-weight="500" text-anchor="start" x="35" y="980">Solid arrows show execution or data flow; shaded services are external to the run home.</text></svg></div><figcaption>01 / System architecture · Scroll horizontally on narrow screens.</figcaption></figure>
+<p>The harness controls prompts and collects evidence; the <strong>product</strong> performs memory writes
+and retrieval. Its verification API client reads stored rows independently. This separates
+“the assistant said it remembered” from “the right value appeared in a successful memory
+tool result and in the answer.” Both the provider APIs and the memory backend are real in
+a behavioral run. A local memory backend removes the MidBrain cloud dependency, but client
+model calls still use their configured providers.</p>
+<h3 id="why-these-boundaries-exist">Why these boundaries exist</h3>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Product adapters vs harness manifests</td>
+<td>Product adapters install and repair integrations; harness manifests launch clients and interpret their evidence. Client CLI changes should stay in the driver.</td>
+</tr>
+<tr>
+<td>Frozen package vs live checkout</td>
+<td>Sessions execute preserved candidate bytes, so an edit during a long run cannot silently change the tested product. Recorded input changes fail checks.</td>
+</tr>
+<tr>
+<td>Private home vs real home</td>
+<td>Configuration, credentials, projects and caches belong to this run. A before/after tripwire detects changes to enumerated host surfaces. It is detection, not a security sandbox.</td>
+</tr>
+<tr>
+<td>Native hooks vs verification readback</td>
+<td>Hook execution must come from the client. Readback proves what reached the API; the harness does not replay a failed hook to manufacture a pass.</td>
+</tr>
+<tr>
+<td>Scenarios vs scoring vs rendering</td>
+<td>Prompts exercise behavior, checks evaluate evidence, and the report displays those checks. Export reuses the same results and renderer.</td>
+</tr>
+<tr>
+<td>Private run vs shareable bundle</td>
+<td>Debugging needs detailed local evidence. Review needs selected, redacted evidence and candidate identity, without credential-bearing homes.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="capture-and-cross-client-recall-end-to-end">Capture and cross-client recall, end to end</h3>
+<p>This illustrates one S2 pair. The hidden value is supplied only to the writer; the reader
+gets the retrieval anchor. A new reader session prevents conversation history from supplying
+the answer. S1 separately checks capture counts and metadata in detail.</p>
+<figure class="diagram"><div aria-label="Scrollable architecture diagram" class="diagram-scroll" role="group" tabindex="0"><svg aria-labelledby="recall-title recall-desc" role="img" viewbox="0 0 1100 1040" xmlns="http://www.w3.org/2000/svg"><title id="recall-title">One capture and cross-client recall pair</title><desc id="recall-desc">The harness gives a hidden value to the writer, verifies native capture, then asks a fresh reader for the retrieval anchor. Checks require successful tool evidence and the correct final answer.</desc><defs><marker id="recall-arrow" markerheight="7" markerwidth="7" orient="auto-start-reverse" refx="9" refy="5" viewbox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 z" fill="#47756e"></path></marker></defs><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="170" x="10" y="20"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="95.0" y="49.0">Harness</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="95.0" y="74.0">scenario</text><path d="M 95 90 V 985" stroke="#c6d6cd" stroke-dasharray="5 6" stroke-width="2"></path><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="170" x="230" y="20"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="315.0" y="49.0">Writer</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="315.0" y="74.0">client</text><path d="M 315 90 V 985" stroke="#c6d6cd" stroke-dasharray="5 6" stroke-width="2"></path><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="170" x="450" y="20"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="49.0">Product</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="535.0" y="74.0">hooks / MCP</text><path d="M 535 90 V 985" stroke="#c6d6cd" stroke-dasharray="5 6" stroke-width="2"></path><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="170" x="670" y="20"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="755.0" y="49.0">MidBrain</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="755.0" y="74.0">test API</text><path d="M 755 90 V 985" stroke="#c6d6cd" stroke-dasharray="5 6" stroke-width="2"></path><rect fill="#edf6f1" height="70" rx="12" stroke="#95b7ab" width="170" x="890" y="20"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="975.0" y="49.0">Fresh reader</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="975.0" y="74.0">client</text><path d="M 975 90 V 985" stroke="#c6d6cd" stroke-dasharray="5 6" stroke-width="2"></path><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="112"></rect><path d="M 95 150 H 315" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="205.0" y="137">Anchor + hidden value</text><rect fill="#ffffff" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="177"></rect><path d="M 315 215 H 535" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="425.0" y="202">Native capture events</text><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="242"></rect><path d="M 535 280 H 755" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="645.0" y="267">Store episodic memory</text><rect fill="#ffffff" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="307"></rect><path d="M 95 345 H 755" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="425.0" y="332">Poll readback; wait for stable capture</text><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="372"></rect><path d="M 755 410 H 95" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-dasharray="6 5" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="425.0" y="397">Stored rows + metadata</text><rect fill="#ffffff" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="437"></rect><path d="M 95 475 H 975" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="535.0" y="462">Ask for anchor; withhold hidden value</text><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="502"></rect><path d="M 975 540 H 535" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="755.0" y="527">Memory retrieval tool call</text><rect fill="#ffffff" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="567"></rect><path d="M 535 605 H 755" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="645.0" y="592">Search memory</text><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="632"></rect><path d="M 755 670 H 535" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-dasharray="6 5" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="645.0" y="657">Matching content</text><rect fill="#ffffff" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="697"></rect><path d="M 535 735 H 975" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-dasharray="6 5" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="755.0" y="722">Successful tool result</text><rect fill="#edf6f1" fill-opacity=".75" height="58" rx="8" width="1076" x="12" y="762"></rect><path d="M 975 800 H 95" fill="none" marker-end="url(#recall-arrow)" stroke="#47756e" stroke-dasharray="6 5" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="535.0" y="787">Final answer + native tool evidence</text><rect fill="#163f36" height="90" rx="12" stroke="#163f36" width="1060" x="20" y="885"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="550.0" y="924.0">Check successful recall, hidden value in answer, and memory-first compliance.</text><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="550.0" y="949.0">Persist every check and its evidence references.</text></svg></div><figcaption>02 / Capture and recall sequence · Scroll horizontally on narrow screens.</figcaption></figure>
+<p>Model behavior remains variable. Deterministic scoring means the same evidence receives
+the same checks; it does not promise identical answers, tokens or latency on every run.</p>
+<h2 id="one-run-step-by-step">One run, step by step</h2>
+<ol>
+<li><strong>Doctor (separate preflight command).</strong> Checks client binaries, secrets, that the
+   MidBrain API answers with the harness key, and that the run root is durable and outside
+   temp directories (the product skips self-repair from temp directories).</li>
+<li><strong>Freeze the candidate.</strong> <code>npm pack</code> the checkout, extract it, <code>npm ci</code> its runtime, hash
+   the package source and selected harness runtime files. Recorded hashes and tarball bytes
+   are checked before and after each shared <code>runTurn</code> call. The snapshot excludes
+   <code>node_modules</code> and dotfiles; it does not detect newly added files or freeze provider behavior.</li>
+<li><strong>Build a throwaway home.</strong> A fresh <code>$HOME</code> under the run directory with detection fixtures
+   for the selected clients (an empty <code>~/.claude/settings.json</code>, a <code>~/.codex/</code> dir, and so on),
+   a pre-seeded MidBrain key, and three project dirs (<code>proj-a</code>, <code>proj-b</code>, <code>proj-c</code>). Children
+   get an isolated home and scrubbed environment; the selected adapter explicitly adds its
+   test credentials and required settings. Local Codex ChatGPT mode explicitly copies host
+   login credentials into the run home; the workflow uses API-key authentication instead.</li>
+<li><strong>Registry mode (optional).</strong> Start a loopback Verdaccio that proxies npmjs but serves the
+   candidate as <code>latest</code>. With <code>--upgrade</code> it first installs the previous published release,
+   captures on it, then publishes the candidate and upgrades through the product's documented
+   path. Dev mode instead points clients at the extracted candidate with <code>install.mjs --dev</code>.</li>
+<li><strong>Install.</strong> Run the product's real <code>install.mjs</code> inside the throwaway home. Then ask the
+   product's own client adapters whether each install is present and "fresh" (canonical hooks,
+   plugin, shim).</li>
+<li><strong>Scenarios, in a fixed order.</strong> S1 capture, S6 no-match, S8 literal markers, S3 fresh-session
+   continuity, S2 cross-client recall (every ordered pair by default; one cycle with <code>--simple</code>), S5 current-vs-stale,
+   S4 project/global isolation, S9 upgrade continuity, S10 client-specific cases. The S9
+   upgrade prelude runs before this sequence. Clients execute real sessions; exact prompts,
+   raw streams and normalised turns are saved. Capture and recall scenarios use markers,
+   API polling, settling and indexing waits where needed. S6 asks an unrelated question
+   without a marker or API readback; not every turn has all these evidence files.</li>
+<li><strong>Score.</strong> Each scenario emits cells: named checks, all deterministic, no model-as-judge.
+   PASS means every check passed. BLOCKED means a prerequisite was missing (binary, secret,
+   Docker, approval support, provider billing error). Failed cells are not automatically
+   rerun until green. Polling retries transient reads, and NanoClaw may natively retry
+   response formatting; every native reply must still be captured exactly once.</li>
+<li><strong>Tripwire and report.</strong> Hash enumerated host config surfaces before and after; detected drift
+   fails the run. Render <code>report.md</code> and <code>results.json</code>. Exit 0 only when every cell is PASS
+   and isolation is clean. <code>--required</code> additionally requires registry+upgrade mode and the
+   full client/scenario selection. A focused green run is only a checkpoint.</li>
+</ol>
+<h2 id="what-each-file-does">What each file does</h2>
+<p>All paths below are relative to this repository. The harness is development tooling;
+<code>package.json</code> does not include <code>harness/</code> in the published npm package.</p>
+<h3 id="product-under-test">Product under test</h3>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Location</th>
+<th>Responsibility and why it matters to testing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a class="repo-ref" href="#source-5" title="Repository reference: index.js">index.js</a>, <a class="repo-ref" href="#source-6" title="Repository reference: mcp.mjs">mcp.mjs</a></td>
+<td>CLI/MCP entry point and tool handlers. These are the actual tools invoked by client sessions.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-7" title="Repository reference: install.mjs">install.mjs</a>, <a class="repo-ref" href="#source-8" title="Repository reference: shared/clients">shared/clients/</a></td>
+<td>Installation, credential resolution, configuration and self-repair. Harness setup calls this product code instead of maintaining a second installer.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-9" title="Repository reference: shared/midbrain-api.mjs">shared/midbrain-api.mjs</a></td>
+<td>Product HTTP access to memory. Separate from the harness's read-only verification client.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-10" title="Repository reference: shared/agent-rules.mjs">shared/agent-rules.mjs</a></td>
+<td>Managed memory-first instructions. Behavioral compliance checks measure whether clients follow them.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-11" title="Repository reference: plugins/claude-code">plugins/claude-code/</a>, <a class="repo-ref" href="#source-12" title="Repository reference: plugins/codex">plugins/codex/</a>, <a class="repo-ref" href="#source-13" title="Repository reference: plugins/hermes">plugins/hermes/</a></td>
+<td>Native capture handlers invoked by each client.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-14" title="Repository reference: plugins/opencode/midbrain-memory.ts">plugins/opencode/midbrain-memory.ts</a>, <a class="repo-ref" href="#source-15" title="Repository reference: dist/midbrain-shared.mjs">dist/midbrain-shared.mjs</a></td>
+<td>OpenCode plugin and built runtime bundle, including capture completion at shutdown.</td>
+</tr>
+<tr>
+<td><a class="repo-ref" href="#source-16" title="Repository reference: skills/nanoclaw">skills/nanoclaw/</a></td>
+<td>Product integration instructions/configuration for a NanoClaw group. NanoClaw uses the Claude capture handlers with its own client identity.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Four product changes accompanied this testing work and require release review separately
+from the harness: synchronous Claude Stop plus migration (<code>f84c5f6</code>), recognized NanoClaw
+envelope decoding (<code>5b1f1fe</code>), managed memory-first/full-anchor rules (<code>477bd79</code>), and OpenCode
+capture draining during plugin disposal (<code>03b6271</code>). See the
+<a class="repo-ref" href="#source-17" title="Repository reference: docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes">release review boundaries</a> for details.</p>
+<h3 id="entry-point-and-libraries">Entry point and libraries</h3>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>harness/run.mjs</code></td>
+<td>The CLI: <code>doctor</code>, <code>freeze</code>, <code>run</code>, <code>report</code>. Owns the run lifecycle above, signal handling and cleanup.</td>
+</tr>
+<tr>
+<td><code>harness/lib/context.mjs</code></td>
+<td>Run identity (id, marker like <code>MBH-A27DDB</code>), run directories, and the scrubbed child environment.</td>
+</tr>
+<tr>
+<td><code>harness/lib/env.mjs</code></td>
+<td>Loads <code>harness/.env</code> into absent or empty environment variables; nonempty values win.</td>
+</tr>
+<tr>
+<td><code>harness/lib/candidate.mjs</code></td>
+<td>Packs the candidate, extracts it, installs its runtime, snapshots file hashes, asserts they are unchanged.</td>
+</tr>
+<tr>
+<td><code>harness/lib/home.mjs</code></td>
+<td>Builds the throwaway home, seeds detection fixtures and the global key, runs the real installer, inspects installs.</td>
+</tr>
+<tr>
+<td><code>harness/lib/inspect-install.mjs</code></td>
+<td>Tiny script executed inside the throwaway home that loads the product's own adapters and reports installed/fresh.</td>
+</tr>
+<tr>
+<td><code>harness/lib/registry.mjs</code></td>
+<td>Loopback Verdaccio: config, start/stop, pack and publish the candidate, pick an rc version when the version already exists upstream.</td>
+</tr>
+<tr>
+<td><code>harness/lib/upgrade.mjs</code></td>
+<td>The S9 prelude: capture on the previous release, publish, clear npx cache, upgrade, verify fresh install and recall of pre-upgrade memory.</td>
+</tr>
+<tr>
+<td><code>harness/lib/api.mjs</code></td>
+<td>Read-only MidBrain client used to verify: list episodic rows since a time, poll until a predicate holds, settle window.</td>
+</tr>
+<tr>
+<td><code>harness/lib/checks.mjs</code></td>
+<td>Check helpers and status rules: memory-first compliance, hidden-value recall, JSON current-answer, capture counts, exit code.</td>
+</tr>
+<tr>
+<td><code>harness/lib/evidence.mjs</code></td>
+<td>Copies transcripts and logs, counts cache/spool files, hashes config shape for the report.</td>
+</tr>
+<tr>
+<td><code>harness/lib/tripwire.mjs</code></td>
+<td>Real-home isolation: snapshot and diff of the host's config surfaces, reusing the Vitest tripwire list.</td>
+</tr>
+<tr>
+<td><code>harness/lib/proc.mjs</code></td>
+<td>Spawn with hard timeout, stdin, NDJSON line capture.</td>
+</tr>
+<tr>
+<td><code>harness/lib/report.mjs</code></td>
+<td>Renders the side-by-side matrix and per-cell detail to Markdown; defines the row order.</td>
+</tr>
+<tr>
+<td><code>harness/lib/codex-approval.mjs</code></td>
+<td>Validates the three installed hooks through Codex, invokes native approval, then verifies unchanged hashes and persisted trust in a fresh process.</td>
+</tr>
+<tr>
+<td><code>harness/lib/codex-approval-pty.py</code></td>
+<td>Python standard-library terminal driver for the pinned Codex hook browser; bounded timeout and child cleanup.</td>
+</tr>
+<tr>
+<td><code>harness/scripts/release-evidence.mjs</code></td>
+<td>Exports selected redacted evidence and verifies the required gate against a source SHA and exact archive.</td>
+</tr>
+<tr>
+<td><code>harness/scripts/ci-evidence.mjs</code></td>
+<td>Builds the GitHub summary and bundle; incomplete runs receive an incomplete summary, not passing evidence.</td>
+</tr>
+<tr>
+<td><code>harness/lib/nanoclaw.mjs</code></td>
+<td>The NanoClaw runtime: clones a pinned upstream revision, builds or reuses its image, creates groups, runs one container per turn, collects transcripts.</td>
+</tr>
+<tr>
+<td><code>harness/lib/nanoclaw-mailbox.mjs</code></td>
+<td>The SQLite mailbox NanoClaw reads from and writes to; the harness enqueues inbound messages and reads replies. Needs Node 24.</td>
+</tr>
+<tr>
+<td><code>harness/container/nanoclaw-probe.mjs</code></td>
+<td>Runs inside the NanoClaw image to list MCP tools; a readiness probe, not behavioural evidence.</td>
+</tr>
+<tr>
+<td><code>harness/scripts/local-stack.sh</code></td>
+<td><code>up</code>, <code>seed</code>, <code>status</code>, <code>down</code> for the local MidBrain API stack from the <code>memory</code> repo via docker compose; <code>seed</code> mints two test agents into <code>.env</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="client-manifests-harnessclients">Client manifests (<code>harness/clients/</code>)</h3>
+<p>One file per client. Each exports a manifest: id, supported OSes, how to install, detection
+fixtures, config surfaces, capabilities, known exceptions, client-specific case names, the
+environment to give the child, <code>preflight</code>, <code>version</code>, <code>runTurn</code> (returns a normalised turn:
+final text, tool calls with inputs and results, session id, exit state), and <code>evidence</code>.
+Register the manifest in <code>index.mjs</code> to reuse shared scenarios and reporting. New
+client-specific behavior can require additional cases; those are declared by the adapter.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Driver mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>claude.mjs</code></td>
+<td><code>claude -p --output-format stream-json</code>, <code>--session-id</code> / <code>--resume</code>, parses tool_use and tool_result blocks, copies transcripts.</td>
+</tr>
+<tr>
+<td><code>codex.mjs</code></td>
+<td><code>codex exec --json</code>, ChatGPT-login reuse or <code>codex login --with-api-key</code>, hook-trust bypass for ordinary turns; the persisted-trust case uses <code>--approve-codex-hooks</code> for native UI automation or <code>--interactive</code> for manual approval.</td>
+</tr>
+<tr>
+<td><code>opencode.mjs</code></td>
+<td>Installed run-locally with npm, driven with <code>opencode run</code>, native stream parsed, truncated tool output recovered from its output files.</td>
+</tr>
+<tr>
+<td><code>hermes.mjs</code></td>
+<td>Installed run-locally with <code>uv tool install hermes-agent[mcp]</code>, <code>hermes chat -q</code>, evidence from its session export, hook consent toggle.</td>
+</tr>
+<tr>
+<td><code>nanoclaw.mjs</code></td>
+<td>Thin manifest over <code>lib/nanoclaw.mjs</code>; owns the NanoClaw lifecycle cases.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="scenarios-harnessscenarios">Scenarios (<code>harness/scenarios/</code>)</h3>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_shared.mjs</code></td>
+<td><code>runTurn</code> (persists prompt, turn, asserts frozen inputs), <code>readback</code> (poll by marker), metadata and turn checks, cell constructor.</td>
+</tr>
+<tr>
+<td><code>index.mjs</code></td>
+<td>Execution order.</td>
+</tr>
+<tr>
+<td><code>s01-capture.mjs</code></td>
+<td>User and assistant rows reach the API with matching client/session/cwd metadata and marker text. Exactly one user capture and one capture per native assistant reply.</td>
+</tr>
+<tr>
+<td><code>s02-cross-client-recall.mjs</code></td>
+<td>Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. All ordered pairs by default; <code>--simple</code> selects one directed cycle.</td>
+</tr>
+<tr>
+<td><code>s03-fresh-session-continuity.mjs</code></td>
+<td>A checkpoint written in one session is recovered in a new session of the same client.</td>
+</tr>
+<tr>
+<td><code>s04-project-global-isolation.mjs</code></td>
+<td>Project-scoped key isolates from global; global fallback works from an unscoped directory.</td>
+</tr>
+<tr>
+<td><code>s05-freshness-reconciliation.mjs</code></td>
+<td>After an update, a new session names the current value as current, as JSON, citing memory evidence. Conflicting live repository/file state is not tested.</td>
+</tr>
+<tr>
+<td><code>s06-no-match-clean.mjs</code></td>
+<td>An unrelated question gets a clean answer with no memory process language; it does not force an unsuccessful memory lookup.</td>
+</tr>
+<tr>
+<td><code>s08-marker-robustness.mjs</code></td>
+<td>Marker-like literal text survives the round trip unchanged.</td>
+</tr>
+<tr>
+<td><code>s09-upgrade-continuity.mjs</code></td>
+<td>Surfaces the prelude's cells; BLOCKED outside registry+upgrade mode.</td>
+</tr>
+<tr>
+<td><code>s10-client-specific.mjs</code></td>
+<td>Self-repair of a stale shim, cold first turn in a fresh home, Claude hook ordering, Codex persisted trust, Hermes consent, OpenCode plugin without MCP.</td>
+</tr>
+<tr>
+<td><code>nanoclaw-lifecycle.mjs</code></td>
+<td>NanoClaw cold wake, continuation resume across containers, legacy opener recovery.</td>
+</tr>
+</tbody>
+</table></div>
+<p>S7 is the memory-first/full-anchor compliance checks used inside S2, S3 and S5; there is
+no separate S7 driver to select. S4 uses two different test agents and scoped projects;
+its current reader turns do not cover every possible direction of scope leakage. See the
+<a class="repo-ref" href="#source-18" title="Repository reference: docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership">coverage map</a> for precise
+assertions and gaps relative to the maintainer's manual scenarios.</p>
+<h3 id="nanoclaws-container-boundary">NanoClaw's container boundary</h3>
+<p>The manifest drives the pinned upstream v2 runner at
+<code>6656b326a900dcfba4be8ca76412d954cfc915b5</code>. The local SQLite mailbox replaces messaging
+delivery, while the upstream Claude provider, SDK, MCP connection and hook execution run
+normally. Each turn gets a new container. Resumed sessions preserve their continuation and
+durable group state, including <code>.claude-shared</code> and npm cache mounts. The model's project is
+<code>/workspace/agent</code>, with isolated agent files rather than host project files.</p>
+<p>Linux defaults to Docker host networking for the loopback registry; Docker Desktop uses
+<code>host.docker.internal</code>. A custom network or remote Docker daemon needs reachable API/registry
+URLs and valid host bind mounts; the overrides are in <a class="repo-ref" href="#source-19" title="Repository reference: harness/.env.example">the env template</a>.
+The first run may clone source and build an image. <code>nanoclaw.json</code> records source/image identity.</p>
+<p>NanoClaw can produce another native assistant reply while retrying response formatting.
+Capture checks expect one capture per distinct native reply. This is a documented client
+exception, not permission to ignore duplicate captures. The lane excludes Slack/WhatsApp
+delivery, host routing, OneCLI provisioning and other NanoClaw providers. Its legacy case
+reconstructs the old missing-shim/marker configuration, not an entire historical deployment.</p>
+<h3 id="tests-and-docs">Tests and docs</h3>
+<p><code>tests/harness-lib.test.mjs</code>, <code>harness-scoring.test.mjs</code>, <code>harness-nanoclaw.test.mjs</code>,
+<code>harness-hermes.test.mjs</code>, <code>harness-opencode.test.mjs</code> unit-test the scoring, parsing and
+isolation logic without model calls. <code>tests/fixtures/nanoclaw/</code> holds the upstream mailbox
+schema. <code>tests/harness-codex-approval.test.mjs</code> covers approval guards and offers an
+opt-in real-CLI check without model calls; <code>harness-release-evidence.test.mjs</code> and
+<code>harness-ci-evidence.test.mjs</code> cover export, redaction and gate preservation.
+<code>tests/harness-simple.test.mjs</code> covers cycle selection, unavailable clients and mode labels.
+The <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design</a> records coverage limits and manual-checklist gaps;
+<a class="repo-ref" href="#source-20" title="Repository reference: docs/testing/validation-2026-09-08.md">validation notes</a> preserve earlier run outcomes.</p>
+<h2 id="what-a-run-leaves-behind">What a run leaves behind</h2>
+<pre aria-label="Code example" id="code-1" tabindex="0"><code>&lt;run-root&gt;/runs/&lt;run-id&gt;/
+  candidate.json, candidate/   frozen identity, tarball, extracted runtime, harness snapshot
+  home/                        the throwaway home (contains credentials; never upload)
+  logs/                        product hook and server logs at debug level
+  evidence/&lt;client&gt;/&lt;scenario&gt;/ raw stream, normalised turn, prompt, API read-back
+  results.json, report.md      every cell with checks and evidence paths; the matrix
+  isolation.json               real-home tripwire diff
+  registry/, nanoclaw.json     loopback registry state; NanoClaw image and source identity
+</code></pre>
+<p>Local runs retain this directory for investigation. Normal completion, handled interruption
+and timeout cleanup stop the registry and remove run-owned NanoClaw containers; images remain
+cached. A killed process or failed host may prevent cleanup. Test memories also remain in the
+dedicated backend agents. Neither local run directories nor backend memory are automatically
+deleted after a successful local run.</p>
+<h2 id="local-setup">Local setup</h2>
+<p>The commands in this page run from the repository root in Bash/zsh on macOS or Linux.
+Use Node 24 for the complete harness (NanoClaw uses <code>node:sqlite</code>), npm, Git, Python 3,
+<code>uv</code>, and a working Docker daemon. The product itself supports Node 20+, but that is not
+the prerequisite for the complete test harness. These instructions do not establish Windows
+behavioral support; the programmatic CI OS matrix is separate.</p>
+<h3 id="1-install-dependencies-and-pinned-client-clis">1. Install dependencies and pinned client CLIs</h3>
+<p>The following installs Claude/Codex into a harness-owned directory rather than changing
+global client installations. OpenCode and Hermes are installed by their adapters per run;
+Hermes includes its required MCP extra. Network access to package/image registries, upstream
+NanoClaw source, the model providers and the test API is needed.</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-2" type="button">Copy</button><pre aria-label="Code example" id="code-2" tabindex="0"><code class="language-bash">npm ci
+export MIDBRAIN_HARNESS_ROOT="$HOME/.midbrain-harness"
+npm install --prefix "$MIDBRAIN_HARNESS_ROOT/clients" --no-audit --no-fund --no-save \
+  @anthropic-ai/claude-code@2.1.258 @openai/codex@0.150.1
+export PATH="$MIDBRAIN_HARNESS_ROOT/clients/node_modules/.bin:$PATH"
+node --version
+python3 --version
+uv --version
+docker info
+</code></pre></div>
+<p>Keep the run root outside <code>/tmp</code> and other temporary directories: product self-repair skips
+temporary installations. These pins match the checked-in behavioral workflow at this page's
+update date. Review changes to the pins together with the relevant adapters.</p>
+<h3 id="2-configure-dedicated-test-credentials-and-the-backend">2. Configure dedicated test credentials and the backend</h3>
+<p>Create the gitignored config only if it does not exist, then edit it locally:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-3" type="button">Copy</button><pre aria-label="Code example" id="code-3" tabindex="0"><code class="language-bash">if [ ! -e harness/.env ]; then
+  (umask 077; cp harness/.env.example harness/.env)
+fi
+chmod 600 harness/.env
+</code></pre></div>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>What to put there</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MIDBRAIN_HARNESS_API_URL</code></td>
+<td>Explicit non-production API URL, reachable from the host and NanoClaw containers. Set it even though local CLI configuration permits a default.</td>
+</tr>
+<tr>
+<td><code>MIDBRAIN_HARNESS_API_KEY</code></td>
+<td>Dedicated global test agent key; keys matching real-home key files are refused.</td>
+</tr>
+<tr>
+<td><code>MIDBRAIN_HARNESS_PROJECT_API_KEY</code></td>
+<td>A second, different test agent key. Required for S4 and a passing complete matrix.</td>
+</tr>
+<tr>
+<td><code>ANTHROPIC_API_KEY</code></td>
+<td>Provider credential for Claude, OpenCode, Hermes and NanoClaw with the model configuration below.</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>Provider credential for Codex in API-key mode.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The loader fills absent or empty environment variables from <code>.env</code>; nonempty shell values
+win. Do not paste secrets into commands or reports. Local Codex optionally supports
+<code>MIDBRAIN_HARNESS_CODEX_AUTH=chatgpt</code>, which explicitly copies host login credentials into
+the private run home. The reproducible workflow path uses <code>apikey</code> instead.</p>
+<p>For the sibling local <code>memory</code> repository, these explicit setup operations start its Docker
+stack and create two test agents, writing their keys and API URL into <code>harness/.env</code>:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-4" type="button">Copy</button><pre aria-label="Code example" id="code-4" tabindex="0"><code class="language-bash">bash harness/scripts/local-stack.sh up
+bash harness/scripts/local-stack.sh seed
+bash harness/scripts/local-stack.sh status
+</code></pre></div>
+<p>Set <code>MIDBRAIN_MEMORY_REPO</code> to an absolute path if the backend is not at <code>../memory</code>.
+Seed during initial setup; it is not a required step before each test run. Add the provider
+keys afterward. Use <code>bash harness/scripts/local-stack.sh down</code> when finished with the local
+backend; data persists. For an existing staging API, configure its dedicated keys directly
+and skip this helper.</p>
+<h3 id="3-pin-models-and-check-readiness">3. Pin models and check readiness</h3>
+<p>This configuration matches the workflow's default model choices. Export it in the shell
+used for the run, or place these values in <code>harness/.env</code> without the <code>export</code> prefix:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-5" type="button">Copy</button><pre aria-label="Code example" id="code-5" tabindex="0"><code class="language-bash">export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_OPENCODE_MODEL=anthropic/claude-haiku-4-5
+export MIDBRAIN_HARNESS_HERMES_PROVIDER=anthropic
+export MIDBRAIN_HARNESS_HERMES_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_NANOCLAW_MODEL=claude-haiku-4-5
+export MIDBRAIN_HARNESS_CODEX_MODEL=gpt-5.6-sol
+export MIDBRAIN_HARNESS_CODEX_AUTH=apikey
+export MIDBRAIN_HARNESS_OPENCODE_VERSION=1.18.29
+export MIDBRAIN_HARNESS_HERMES_VERSION=0.19.0
+export MIDBRAIN_HARNESS_VERDACCIO=verdaccio@6.2.0
+node harness/run.mjs doctor
+</code></pre></div>
+<p>Inspect <strong>every client's verdict</strong>, the project key and API probe. Doctor can report READY
+with only a subset runnable; its exit code alone does not certify readiness for the required
+matrix. It does not make paid model calls or guarantee model access or provider balance.
+Use <code>doctor --clients claude,codex</code> when intentionally preparing only that subset.</p>
+<p>Costs depend on model tokens, tool results, context, caching and native retries. A scenario
+can launch several fresh sessions, and a prompt can require several provider calls. A
+report cell is an assertion group, not a billable model call. The four Anthropic clients
+and API-authenticated Codex bill their respective providers; runner costs are separate.</p>
+<h2 id="choose-and-run-a-suite">Choose and run a suite</h2>
+<p>Start with a programmatic check, then smoke, then simple for broader iteration. Run required
+when collecting complete release evidence. The model-backed commands below incur provider
+usage; <code>npm run check</code> does not run a paid behavioral matrix.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Run</th>
+<th>Purpose</th>
+<th>Can establish the full required gate?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Programmatic</td>
+<td>Build, lint, tests, docs and isolation gates</td>
+<td>Separate prerequisite</td>
+</tr>
+<tr>
+<td>Smoke</td>
+<td>S1 capture and S6 clean unrelated answers in all five clients</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Simple</td>
+<td>All scenarios and upgrades, with one cross-client cycle</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Required</td>
+<td>All scenarios, upgrades and every ordered cross-client pair</td>
+<td>Yes, if complete, all checks pass and evidence verifies</td>
+</tr>
+<tr>
+<td>Focused</td>
+<td>Selected clients/scenarios while diagnosing a failure</td>
+<td>No</td>
+</tr>
+</tbody>
+</table></div>
+<p>Run each command as a separate operation; these are alternatives, not a script that must
+execute all paid suites in sequence.</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-6" type="button">Copy</button><pre aria-label="Code example" id="code-6" tabindex="0"><code class="language-bash"># Programmatic checks
+VITEST_MAX_WORKERS=4 npm run check
+</code></pre></div>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-7" type="button">Copy</button><pre aria-label="Code example" id="code-7" tabindex="0"><code class="language-bash"># Smoke: all five clients, two scenarios
+node harness/run.mjs run --mode registry --scenarios s01,s06
+</code></pre></div>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-8" type="button">Copy</button><pre aria-label="Code example" id="code-8" tabindex="0"><code class="language-bash"># Simple: all scenarios, reduced cross-client pairing
+node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
+</code></pre></div>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-9" type="button">Copy</button><pre aria-label="Code example" id="code-9" tabindex="0"><code class="language-bash"># Required: full selection, including upgrades and native Codex approval
+node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
+</code></pre></div>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-10" type="button">Copy</button><pre aria-label="Code example" id="code-10" tabindex="0"><code class="language-bash"># Focused: one cross-client comparison in both directions
+node harness/run.mjs run --mode registry --clients codex,nanoclaw --scenarios s02
+</code></pre></div>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-11" type="button">Copy</button><pre aria-label="Code example" id="code-11" tabindex="0"><code class="language-bash"># Focused: previous-release upgrade continuity for Claude
+node harness/run.mjs run --mode registry --upgrade --clients claude --scenarios s09
+</code></pre></div>
+<p>The default <code>dev</code> mode runs the extracted candidate directly. Registry mode exercises npm
+resolution through a loopback Verdaccio registry; it does not publish to public npm. With
+<code>--upgrade</code>, the harness captures on the previous published release first, publishes the
+candidate locally, clears resolution caches and verifies upgrade continuity. S9 is blocked
+without registry+upgrade; NanoClaw's legacy S10 case also needs registry mode.</p>
+<p><code>--required</code> rejects client/scenario filters and requires registry+upgrade. <code>--simple</code> changes
+only S2 pair selection, cannot combine with <code>--required</code>, and follows this stable order:</p>
+<figure class="diagram"><div aria-label="Scrollable architecture diagram" class="diagram-scroll" role="group" tabindex="0"><svg aria-labelledby="cycle-title cycle-desc" role="img" viewbox="0 0 1050 250" xmlns="http://www.w3.org/2000/svg"><title id="cycle-title">Simple mode directed cycle</title><desc id="cycle-desc">OpenCode writes to Claude, Claude to Codex, Codex to Hermes, Hermes to NanoClaw, and NanoClaw to OpenCode. Every client writes once and reads once.</desc><defs><marker id="cycle-arrow" markerheight="7" markerwidth="7" orient="auto-start-reverse" refx="9" refy="5" viewbox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 z" fill="#47756e"></path></marker></defs><path d="M 195 74 H 225" fill="none" marker-end="url(#cycle-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 405 74 H 435" fill="none" marker-end="url(#cycle-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 615 74 H 645" fill="none" marker-end="url(#cycle-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 825 74 H 855" fill="none" marker-end="url(#cycle-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 930 111 V 164 H 105 V 111" fill="none" marker-end="url(#cycle-arrow)" stroke="#47756e" stroke-width="2"></path><text fill="#173c36" font-size="15" font-weight="500" text-anchor="middle" x="525" y="195">One writer + one reader role per client</text><rect fill="#163f36" height="76" rx="12" stroke="#163f36" width="180" x="15" y="35"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="105.0" y="79.0">OpenCode</text><rect fill="#edf6f1" height="76" rx="12" stroke="#95b7ab" width="180" x="225" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="315.0" y="79.0">Claude</text><rect fill="#edf6f1" height="76" rx="12" stroke="#95b7ab" width="180" x="435" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="525.0" y="79.0">Codex</text><rect fill="#edf6f1" height="76" rx="12" stroke="#95b7ab" width="180" x="645" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="735.0" y="79.0">Hermes</text><rect fill="#edf6f1" height="76" rx="12" stroke="#95b7ab" width="180" x="855" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="945.0" y="79.0">NanoClaw</text><text fill="#173c36" font-size="17" font-weight="500" text-anchor="middle" x="525" y="230">5 pairs / 10 S2 prompts · Full matrix: 20 pairs / 40 S2 prompts</text></svg></div><figcaption>03 / Simple-mode pair selection · Scroll horizontally on narrow screens.</figcaption></figure>
+<p>With five clients, simple runs five writer/reader pairs and ten S2 prompts. Full mode runs
+twenty ordered pairs and forty S2 prompts. The thirty-prompt saving applies to S2, not the
+whole run or bill. Subsets form a cycle in the same manifest order; S2 needs at least two
+clients. Unavailable clients keep their place in a simple cycle, and affected links are
+BLOCKED. The planned links are recorded in <code>run.crossClientPairs</code>.</p>
+<p><code>--approve-codex-hooks</code> requires Python 3 and Codex 0.150.1 on Linux/macOS. It validates the
+three installed MidBrain hooks, drives the native approval UI, and verifies unchanged hook
+hashes and persisted trust in a fresh process. S10 checks no capture before approval and
+capture afterward without bypass. Ordinary turns use the adapter's headless approval/trust
+bypasses; those do not establish persisted trust. Use <code>--interactive</code> for manual terminal
+approval instead. Without either option, that S10 case remains blocked.</p>
+<p>Default capture readback waits up to 90 seconds, polling every 5 seconds and checking a
+5-second stable capture window; indexing grace is 20 seconds where used. Client turns default
+to a 300-second timeout. These are waiting bounds, not automatic reruns of failed scenarios.
+Tune through the documented env template/CLI flags only when investigating measured delays.
+Record the changed configuration and keep the original failed run.</p>
+<h2 id="how-to-read-and-parse-results">How to read and parse results</h2>
+<h3 id="start-with-the-verdict-and-identity">Start with the verdict and identity</h3>
+<p>The run prints the path to <code>report.md</code>. Open it, then check:</p>
+<ol>
+<li><strong>Identity:</strong> candidate SHA, dirty flag, package version, archive hash, mode and client
+   versions. <code>results.json</code> also records model pins in <code>run.models</code>. Confirm this is the
+   intended candidate and configuration, not a report from before a fix.</li>
+<li><strong>Completeness and scope:</strong> a finished timestamp and <code>results.json</code>, then <code>run.required</code>,
+   <code>run.simple</code> and selected clients/scenarios. Even a broad run without <code>--required</code> is a
+   checkpoint. <code>results.partial.json</code> is progress after some scenarios, not completed evidence.</li>
+<li><strong>Isolation:</strong> <code>results.isolation.ok</code> must be true, with an empty drift list. The sibling
+   <code>isolation.json</code> contains before/after snapshot timestamps and drift, not an <code>ok</code> field.</li>
+<li><strong>Matrix:</strong> find the failing row/client, then read every matching entry in <strong>Cell details</strong>.
+   Each matrix square shows the worst status across its underlying cells; one square can
+   include several cross-client readers/writers or client-specific cases.</li>
+</ol>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PASS</td>
+<td>Every named check in that cell passed. This does not imply every other cell or suite passed.</td>
+</tr>
+<tr>
+<td>FAIL</td>
+<td>A check failed, including a scenario error. Inspect evidence before attributing it to the product, client or harness.</td>
+</tr>
+<tr>
+<td>BLOCKED</td>
+<td>A prerequisite or execution dependency prevented validation; the reason is recorded. This is not a pass.</td>
+</tr>
+<tr>
+<td>SKIP / FLAKY</td>
+<td>Supported report statuses, both non-passing for the run gate. There is no automatic flaky-test detection or rerun scheduler.</td>
+</tr>
+<tr>
+<td>—</td>
+<td>No cell for that row/client in this run; no coverage claim.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The run exits <strong>0 only for a nonempty set of all-PASS cells with clean isolation</strong>. Non-PASS
+cells exit 1; handled interruptions have signal exit codes. A focused/simple run can exit 0
+without satisfying release coverage. Preserve the command's failure status in scripts; do
+not turn failures into success with <code>|| true</code> or an unchecked pipe to <code>tail</code>.</p>
+<p>To preserve the result while still printing a useful message in a Bash script:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-12" type="button">Copy</button><pre aria-label="Code example" id="code-12" tabindex="0"><code class="language-bash">if node harness/run.mjs run --mode registry --scenarios s01,s06; then
+  run_status=0
+else
+  run_status=$?
+fi
+printf 'Harness exit status: %s\n' "$run_status"
+# Perform any local reporting here, then propagate the original result.
+exit "$run_status"
+</code></pre></div>
+<h3 id="parse-an-existing-run-without-model-calls">Parse an existing run without model calls</h3>
+<p>Set <code>run_dir</code> to the directory containing the printed report. This Node snippet works on a
+completed private run or exported bundle and needs no extra JSON utility. It prints identity,
+counts, failed check names and evidence paths, rather than dumping credentials or transcripts.
+It is a diagnostic summary, not a replacement for the release verifier.</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-13" type="button">Copy</button><pre aria-label="Code example" id="code-13" tabindex="0"><code class="language-bash">run_dir="/absolute/path/to/completed-run"
+node --input-type=module - "$run_dir/results.json" &lt;&lt;'JS'
+import { readFileSync } from 'node:fs';
+const r = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+if (!r.run?.finishedAt || !Array.isArray(r.cells)) {
+  throw new Error('Use completed results.json, not partial results');
+}
+const counts = {};
+for (const cell of r.cells) counts[cell.status] = (counts[cell.status] || 0) + 1;
+console.log(JSON.stringify({
+  runId: r.run.runId,
+  candidateSha: r.candidate.sha,
+  archiveSha256: r.candidate.tarballSha256,
+  dirty: r.candidate.dirty,
+  required: r.run.required,
+  simple: r.run.simple ?? false,
+  pairs: r.run.crossClientPairs ?? 'Not recorded by this harness version',
+  models: r.run.models,
+  clients: r.clients.map(c =&gt; ({ id: c.id, version: c.version, runnable: c.runnable })),
+  isolationOk: r.isolation.ok,
+  counts,
+}, null, 2));
+for (const c of r.cells.filter(c =&gt; c.status !== 'PASS')) {
+  console.log(`\n${c.status}: ${c.client} / ${c.scenario} / ${c.row}`);
+  if (c.blockedReason) console.log(`  Blocked: ${c.blockedReason}`);
+  for (const check of c.checks ?? []) {
+    if (!check.ok) console.log(`  Failed check: ${check.name}`);
+  }
+  for (const file of c.evidence ?? []) console.log(`  Evidence: ${file}`);
+}
+JS
+</code></pre></div>
+<p>Rebuild a local report from its existing JSON without rerunning clients:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-14" type="button">Copy</button><pre aria-label="Code example" id="code-14" tabindex="0"><code class="language-bash">node harness/run.mjs report "$run_dir"
+</code></pre></div>
+<p>This rewrites <code>report.md</code> only. Do not edit files inside a checksummed release bundle;
+regenerate a new export from the original run instead.</p>
+<h3 id="follow-a-failed-cell-back-to-evidence">Follow a failed cell back to evidence</h3>
+<p>Each cell contains <code>row</code>, <code>scenario</code>, <code>client</code>, <code>status</code>, <code>checks</code>, <code>prompt</code>, <code>expected</code>,
+<code>evidence</code>, <code>notes</code> and <code>blockedReason</code>. Each check has a <code>name</code>, boolean <code>ok</code> and <code>detail</code>.
+Use the cell's relative evidence references under the run directory; filenames differ by
+scenario and not every turn has an API readback.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Evidence</th>
+<th>What to inspect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>*.prompt.json</code></td>
+<td>Exact prompt, project, session/resume and turn options. Was the hidden answer withheld from the reader?</td>
+</tr>
+<tr>
+<td>Normalized turn <code>*.json</code></td>
+<td>Final text, session ID, successful tool calls with inputs/results, process exit, timeout/error state. Did the client actually retrieve the value?</td>
+</tr>
+<tr>
+<td><code>*.readback.json</code></td>
+<td>Stored rows, user/assistant splits, timeout/poll information and metadata. Did capture reach the correct test agent and session? Some cases save a different readback shape.</td>
+</tr>
+<tr>
+<td>Raw streams and product logs</td>
+<td>Native hook failures, startup/packaging errors and parser details when normalized evidence is insufficient. Keep these private.</td>
+</tr>
+<tr>
+<td><code>candidate.json</code>, <code>nanoclaw.json</code></td>
+<td>Package/source identity and NanoClaw runner/image identity for reproducing an environment-specific failure.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For example, a failed <strong>Cross-client recall</strong> square can mean the reader never called
+MidBrain, a tool failed, the tool returned irrelevant content, or the final answer omitted
+the retrieved value. Those require different fixes. Compare the failing check with the
+reader's normalized turn and the writer's capture readback before changing prompts or code.</p>
+<p>A missing marker in API readback alone does not prove no capture occurred: the native reply
+may have omitted or changed it. Likewise, an API outage does not establish a client defect.
+Check native output and the recorded API errors; use <code>blockedReason</code> for dependency failures.
+After fixing the cause, run a focused scenario, retain both run IDs, and finally rerun the
+required matrix on the intended candidate. A focused fix does not rewrite an old failed gate.</p>
+<h2 id="export-and-verify-release-evidence">Export and verify release evidence</h2>
+<p>Export only completed runs into a new directory outside the private run directory:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-15" type="button">Copy</button><pre aria-label="Code example" id="code-15" tabindex="0"><code class="language-bash">node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
+node harness/scripts/release-evidence.mjs verify \
+  /absolute/path/to/new-bundle /absolute/path/to/exact-tested-release.tgz FULL_SOURCE_SHA
+</code></pre></div>
+<p>Replace the placeholders with the exact archive and full source SHA intended for release.
+The exporter creates a regenerated report, redacted results/candidate identity, selected
+normalized prompts/turns/readbacks, the safe native approval receipt when present, and a
+checksum manifest. Credential-bearing homes, raw streams, databases, installer logs and
+package archives stay out. Review the bundle before sharing: redaction covers known secrets
+and common patterns, not arbitrary sensitive text in model output.</p>
+<p><strong>Export success means the directory was created. Verification success means the required
+behavioral evidence matches the supplied candidate and passes the verifier's gate.</strong> Failed,
+focused, simple or dirty-source runs can be exported as checkpoints; they cannot pass full
+required verification. The verifier checks bundle integrity, report/result agreement, clean
+source/isolation, required coverage, checks, versions/models and the exact tarball/source hash.
+It reuses the results rather than asking another model to judge them.</p>
+<figure class="diagram"><div aria-label="Scrollable architecture diagram" class="diagram-scroll" role="group" tabindex="0"><svg aria-labelledby="release-title release-desc" role="img" viewbox="0 0 1050 350" xmlns="http://www.w3.org/2000/svg"><title id="release-title">Evidence export and release verification</title><desc id="release-desc">A completed private run becomes a selected redacted bundle. The verifier compares it with the exact tested tarball and full source SHA. Export success alone is not a passing release gate.</desc><defs><marker id="release-arrow" markerheight="7" markerwidth="7" orient="auto-start-reverse" refx="9" refy="5" viewbox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 z" fill="#47756e"></path></marker></defs><path d="M 265 74 H 335" fill="none" marker-end="url(#release-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 605 74 H 675" fill="none" marker-end="url(#release-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 810 114 V 185" fill="none" marker-end="url(#release-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 605 230 H 675" fill="none" marker-end="url(#release-arrow)" stroke="#47756e" stroke-width="2"></path><path d="M 810 270 V 303 H 200 V 270" fill="none" marker-end="url(#release-arrow)" stroke="#47756e" stroke-width="2"></path><rect fill="#edf6f1" height="80" rx="12" stroke="#95b7ab" width="250" x="15" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="140.0" y="69.0">Completed private run</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="140.0" y="94.0">Results + raw evidence</text><rect fill="#edf6f1" height="80" rx="12" stroke="#95b7ab" width="270" x="335" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="470.0" y="69.0">Select + redact</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="470.0" y="94.0">Report, results, checksums</text><rect fill="#edf6f1" height="80" rx="12" stroke="#95b7ab" width="270" x="675" y="35"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="810.0" y="69.0">Shareable bundle</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="810.0" y="94.0">No credential-bearing home</text><rect fill="#fff3db" height="80" rx="12" stroke="#d6b96d" width="270" x="335" y="190"></rect><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="470.0" y="224.0">Exact release tarball</text><text fill="#173c36" font-size="18" font-weight="500" text-anchor="middle" x="470.0" y="249.0">+ full source SHA</text><rect fill="#163f36" height="80" rx="12" stroke="#163f36" width="270" x="675" y="190"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="810.0" y="224.0">Release verifier</text><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="810.0" y="249.0">Integrity + required checks</text><rect fill="#163f36" height="80" rx="12" stroke="#163f36" width="250" x="15" y="190"></rect><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="140.0" y="224.0">Verified required gate</text><text fill="#fff" font-size="18" font-weight="500" text-anchor="middle" x="140.0" y="249.0">or rejection</text><text fill="#173c36" font-size="17" font-weight="500" text-anchor="middle" x="525" y="337">A checkpoint can export successfully and still fail required verification.</text></svg></div><figcaption>04 / Release evidence boundary · Scroll horizontally on narrow screens.</figcaption></figure>
+<p>An RC-version rewrite changes archive bytes. A later repack with another version cannot
+inherit this hash match, even when source code looks equivalent. Checksums detect mismatches;
+they are not authorship signatures. Verification complements programmatic CI and Radu's
+review under the <a class="repo-ref" href="#source-21" title="Repository reference: docs/releases/README.md#release-validation-checklist">release checklist</a>.</p>
+<h2 id="running-it-automatically">Running it automatically</h2>
+<p>The manual <a class="repo-ref" href="#source-22" title="Repository reference: .github/workflows/behavioral.yml">behavioral workflow</a> is built, but has
+not been deployed or validated on a cloud runner. Use <a class="repo-ref" href="#source-3" title="Repository reference: docs/testing/behavioral-ci.md">workflow setup</a>
+for runner prerequisites, exact pins, environment settings and the deployment sequence.
+The YAML file is the source of truth; there is no second workflow example in this guide.</p>
+<ul>
+<li><strong>Runner:</strong> currently <code>[self-hosted, linux, midbrain-behavioral]</code>. One Linux VM runs the
+  clients, with NanoClaw in Docker. A GitHub-hosted Ubuntu trial is proposed, not implemented.</li>
+<li><strong>Backend:</strong> an already-running test MidBrain API reachable from the VM and NanoClaw.
+  The workflow does not start or seed the sibling <code>memory</code> stack.</li>
+<li><strong>Configuration:</strong> the <code>behavioral-testing</code> environment holds four secret keys and
+  <code>MIDBRAIN_HARNESS_API_URL</code> as a variable. Keys enter the relevant steps as environment
+  variables; the workflow does not generate <code>harness/.env</code>.</li>
+<li><strong>Trigger:</strong> manual <code>workflow_dispatch</code> only. No push, release or scheduled trigger.</li>
+<li><strong>Suites:</strong> smoke runs S1/S6; simple retains all scenarios with one cross-client cycle;
+  required runs the full registry+upgrade matrix. All preserve failing exit codes.
+  Smoke and simple success are not full required sign-off.</li>
+</ul>
+<p>After the workflow is activated, the operator selects a branch, suite and Anthropic model
+under <strong>Actions → Behavioral tests → Run workflow</strong>. The current workflow then installs
+pinned clients, checks prerequisites, executes the selected CLI recipe, exports evidence,
+uploads an artifact and cleans up. It serializes runs across branches to avoid overlapping
+use of the dedicated backend identities. Execution has a 195-minute timeout inside a
+240-minute job budget. Provisioning the runner/backend and activating this button remain
+deployment work; see the linked setup guide.</p>
+<p><strong>Shareable evidence:</strong> the workflow uploads only <code>summary.md</code> and the exported, redacted
+<code>bundle/</code>, retained for 14 days. Raw <code>results.json</code>, streams, logs, databases and run homes
+remain private. Required CI also verifies the bundle against the checked-out source SHA
+and the run's exact candidate archive; successful export alone cannot make a run green.
+An interrupted run receives an incomplete summary, not completed passing evidence. The
+original suite failure stays red even if export succeeds. The workflow deletes this attempt's
+private root and labelled containers, including its candidate archive; preserving that
+archive for later release verification requires a separate private retention decision.
+No PR/release comments or Slack messages are sent by the current workflow.</p>
+<h2 id="what-is-validated-and-what-remains">What is validated and what remains</h2>
+<p>This is a dated checkpoint, not a live status dashboard:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Implemented</th>
+<th>Recorded validation as of 2026-09-09</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Programmatic suite and harness logic</td>
+<td>Product tests, scoring/driver checks, isolation, evidence and simple-mode tests</td>
+<td>After simple mode: 1,332 tests passed, 3 skipped, plus 224 copied-topology isolation checks.</td>
+</tr>
+<tr>
+<td>Native Codex hook approval</td>
+<td>Guarded native UI driver and before/after capture scenario</td>
+<td>Approval driver checked in six fresh macOS homes without model calls; earlier opt-in full check passed 1,324 tests plus 224 isolation checks. Linux remains unvalidated.</td>
+</tr>
+<tr>
+<td>Five-client behavioral matrix</td>
+<td>All adapters and scenarios described above</td>
+<td>Completed broad run <code>20260909-083452-4fdd</code>: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate <code>6d6fc58</code>; <code>required: false</code>. It predates approval automation and simple mode.</td>
+</tr>
+<tr>
+<td>Simple cycle</td>
+<td>Pair selection, labels, reports, export/CI support</td>
+<td>Unit-tested; no recorded live simple matrix yet.</td>
+</tr>
+<tr>
+<td>Release evidence</td>
+<td>Selected redacted export and strict candidate verification</td>
+<td>Export/verifier tests; no complete green required evidence for the intended current candidate.</td>
+</tr>
+<tr>
+<td>Manual GitHub workflow</td>
+<td>Suite/model inputs, setup, execution, artifacts, cleanup</td>
+<td>Built and statically checked; not deployed or run on a cloud runner. Slack alerts are not built.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Before calling the pipeline release-ready, triage those failures, validate Linux execution,
+and obtain a complete passing required report on the intended candidate plus programmatic
+CI and Radu's review. Exact equivalence with the maintainer's separate manual checklist
+remains unconfirmed. Cloud activation, Slack alerts, broader OS/client behavioral coverage,
+automatic update discovery and real-npm post-publish smoke remain outside current proof.</p><section class="references" id="repository-references"><h2>Repository references</h2><p>These paths identify supporting source files in <code>midbrain-memory-mcp</code>. They are references, not required assets: this HTML file works without the repository or a network connection.</p><dl><div id="source-1"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md</code></dd></div><div id="source-2"><dt>Repository source</dt><dd><code>harness/README.md</code></dd></div><div id="source-3"><dt>Repository source</dt><dd><code>docs/testing/behavioral-ci.md</code></dd></div><div id="source-4"><dt>Repository source</dt><dd><code>.github/workflows/ci.yml</code></dd></div><div id="source-5"><dt>Repository source</dt><dd><code>index.js</code></dd></div><div id="source-6"><dt>Repository source</dt><dd><code>mcp.mjs</code></dd></div><div id="source-7"><dt>Repository source</dt><dd><code>install.mjs</code></dd></div><div id="source-8"><dt>Repository source</dt><dd><code>shared/clients</code></dd></div><div id="source-9"><dt>Repository source</dt><dd><code>shared/midbrain-api.mjs</code></dd></div><div id="source-10"><dt>Repository source</dt><dd><code>shared/agent-rules.mjs</code></dd></div><div id="source-11"><dt>Repository source</dt><dd><code>plugins/claude-code</code></dd></div><div id="source-12"><dt>Repository source</dt><dd><code>plugins/codex</code></dd></div><div id="source-13"><dt>Repository source</dt><dd><code>plugins/hermes</code></dd></div><div id="source-14"><dt>Repository source</dt><dd><code>plugins/opencode/midbrain-memory.ts</code></dd></div><div id="source-15"><dt>Repository source</dt><dd><code>dist/midbrain-shared.mjs</code></dd></div><div id="source-16"><dt>Repository source</dt><dd><code>skills/nanoclaw</code></dd></div><div id="source-17"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes</code></dd></div><div id="source-18"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership</code></dd></div><div id="source-19"><dt>Repository source</dt><dd><code>harness/.env.example</code></dd></div><div id="source-20"><dt>Repository source</dt><dd><code>docs/testing/validation-2026-09-08.md</code></dd></div><div id="source-21"><dt>Repository source</dt><dd><code>docs/releases/README.md#release-validation-checklist</code></dd></div><div id="source-22"><dt>Repository source</dt><dd><code>.github/workflows/behavioral.yml</code></dd></div></dl></section></article><footer class="footer">MidBrain Memory MCP · Documentation snapshot, 2026-09-09.<br>Source: <code>docs/testing/harness-how-it-works.md</code>. This page is a guide, not live run evidence.</footer></main></div><div class="copy-status" role="status" aria-live="polite"></div><script>
+const notice=document.querySelector('.copy-status');
+function announce(message){notice.textContent=message;notice.classList.add('visible');setTimeout(()=>notice.classList.remove('visible'),2200)}
+async function copyCode(button){const value=document.getElementById(button.dataset.copy).textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(value)}else{const area=document.createElement('textarea');area.value=value;area.style.cssText='position:fixed;left:-9999px;top:0';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();button.focus();if(!ok)throw Error('Clipboard unavailable')}button.textContent='Copied';announce('Code copied');setTimeout(()=>button.textContent='Copy',1800)}catch{announce('Select the code and copy it manually.')}}
+document.querySelectorAll('[data-copy]').forEach(button=>button.addEventListener('click',()=>copyCode(button)));
+document.querySelector('.print').addEventListener('click',()=>window.print());
+const toc=document.querySelector('.toc');if(matchMedia('(max-width:760px)').matches)toc.open=false;
+const headings=[...document.querySelectorAll('article h2[id]')];const links=[...document.querySelectorAll('.sidebar nav a')];
+let scheduled=false;function updateNav(){let current=headings[0];for(const h of headings){if(h.getBoundingClientRect().top<140)current=h}for(const a of links){const active=a.hash==='#'+current.id;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current')}scheduled=false}
+addEventListener('scroll',()=>{if(!scheduled){scheduled=true;requestAnimationFrame(updateNav)}},{passive:true});updateNav();
+</script></body></html>

@@ -6,6 +6,8 @@ hook logs) into a side-by-side parity report. Design: `docs/testing/multi-client
 
 Start with the [architecture and operator guide](../docs/testing/harness-how-it-works.md)
 for diagrams, the file map, setup and run recipes, results parsing, and release evidence.
+An [offline HTML edition](../docs/testing/harness-how-it-works.html) includes the complete
+guide and embedded diagrams in one shareable file; open it directly in a browser.
 
 ## Quick start (this machine)
 
