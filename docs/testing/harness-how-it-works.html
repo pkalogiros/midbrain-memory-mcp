@@ -8,10 +8,10 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.copy-status{transition:none}}
 @media print{@page{margin:16mm}body{background:white;color:#222;font-size:10pt;line-height:1.55}.layout{display:block;padding:0}.sidebar,.skip,.copy,.copy-status{display:none}.main{max-width:none}.hero{padding:0 0 20px}.hero h1{font-size:32pt}.hero .deck{font-size:12pt}.hero .tags{margin-top:10px}article h2{font-size:22pt;margin-top:30px;break-after:avoid}article h3{font-size:14pt;break-after:avoid}.table-scroll{overflow:visible}table{font-size:9pt}td,th{padding:8px;min-width:0!important}.diagram{break-inside:avoid}.diagram-scroll{overflow:visible}.diagram svg{min-width:0}.diagram figcaption{font-size:8pt}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4ef;color:#173b33;font-size:8pt;border:1px solid #c9d8cc;break-inside:avoid}a{color:inherit}tr{break-inside:avoid}.references{break-before:page}}
 </style></head>
-<body><a class="skip" href="#content">Skip to guide</a><div class="layout"><aside class="sidebar" aria-label="Guide navigation"><div class="brand">MIDBRAIN / ENGINEERING</div><div class="edition">Operator guide · 09 September 2026</div><details class="toc" open><summary>On this page</summary><nav aria-label="Table of contents"><a href="#what-it-is">What it is</a><a href="#architecture">Architecture</a><a href="#one-run-step-by-step">One run, step by step</a><a href="#what-each-file-does">What each file does</a><a href="#what-a-run-leaves-behind">What a run leaves behind</a><a href="#local-setup">Local setup</a><a href="#choose-and-run-a-suite">Choose and run a suite</a><a href="#how-to-read-and-parse-results">How to read and parse results</a><a href="#export-and-verify-release-evidence">Export and verify release evidence</a><a href="#running-it-automatically">Running it automatically</a><a href="#what-is-validated-and-what-remains">What is validated and what remains</a><a href="#repository-references">Repository references</a></nav></details><div class="offline">One file. Works offline.<br>All styles, diagrams and controls are embedded.<br><button class="print" type="button">Print / Save PDF</button></div></aside><main class="main" id="content"><header class="hero"><div class="eyebrow">Architecture &amp; operations</div><h1>Multi-client testing,<br>from session to evidence.</h1><p class="deck">What we built, where it lives, why it works this way — and how to run it, investigate failures and review a release.</p><div class="tags"><span class="tag">5 real clients</span><span class="tag">Smoke / Simple / Required</span><span class="tag">Offline reference</span><span class="tag pending">Full required sign-off pending</span></div></header><article>
+<body><a class="skip" href="#content">Skip to guide</a><div class="layout"><aside class="sidebar" aria-label="Guide navigation"><div class="brand">MIDBRAIN / ENGINEERING</div><div class="edition">Operator guide · 10 September 2026</div><details class="toc" open><summary>On this page</summary><nav aria-label="Table of contents"><a href="#what-it-is">What it is</a><a href="#architecture">Architecture</a><a href="#one-run-step-by-step">One run, step by step</a><a href="#what-each-file-does">What each file does</a><a href="#what-a-run-leaves-behind">What a run leaves behind</a><a href="#local-setup">Local setup</a><a href="#choose-and-run-a-suite">Choose and run a suite</a><a href="#how-to-read-and-parse-results">How to read and parse results</a><a href="#export-and-verify-release-evidence">Export and verify release evidence</a><a href="#running-it-automatically">Running it automatically</a><a href="#what-is-validated-and-what-remains">What is validated and what remains</a><a href="#repository-references">Repository references</a></nav></details><div class="offline">One file. Works offline.<br>All styles, diagrams and controls are embedded.<br><button class="print" type="button">Print / Save PDF</button></div></aside><main class="main" id="content"><header class="hero"><div class="eyebrow">Architecture &amp; operations</div><h1>Multi-client testing,<br>from session to evidence.</h1><p class="deck">What we built, where it lives, why it works this way — and how to run it, investigate failures and review a release.</p><div class="tags"><span class="tag">5 real clients</span><span class="tag">Smoke / Simple / Required</span><span class="tag">Offline reference</span><span class="tag pending">Full required sign-off pending</span></div></header><article>
 <p>Companion to the <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design and coverage map</a>,
 <a class="repo-ref" href="#source-2" title="Repository reference: harness/README.md">CLI commands</a>, and <a class="repo-ref" href="#source-3" title="Repository reference: docs/testing/behavioral-ci.md">workflow setup</a>.
-Updated 2026-09-09 against branch <code>multi-client-test-harness</code>.</p>
+Updated 2026-09-10 against branch <code>multi-client-harness-review</code>.</p>
 <p>Start with <a href="#architecture">architecture</a> to understand the system, <a href="#local-setup">local setup</a>
 to prepare a machine, <a href="#choose-and-run-a-suite">run recipes</a> to execute it, or
 <a href="#how-to-read-and-parse-results">reading results</a> to investigate an existing run.</p>
@@ -259,6 +259,14 @@ capture draining during plugin disposal (<code>03b6271</code>). See the
 <td>The SQLite mailbox NanoClaw reads from and writes to; the harness enqueues inbound messages and reads replies. Needs Node 24.</td>
 </tr>
 <tr>
+<td><code>harness/lib/nanoclaw-package.mjs</code></td>
+<td>Pinned upstream identity and validation contract for an optional self-contained runtime image.</td>
+</tr>
+<tr>
+<td><code>harness/scripts/prepare-nanoclaw.mjs</code>, <code>harness/container/Dockerfile</code></td>
+<td>Build a local packaging layer containing the runner, host assets and upstream license; produce a manifest without running models or publishing.</td>
+</tr>
+<tr>
 <td><code>harness/container/nanoclaw-probe.mjs</code></td>
 <td>Runs inside the NanoClaw image to list MCP tools; a readiness probe, not behavioural evidence.</td>
 </tr>
@@ -379,7 +387,9 @@ durable group state, including <code>.claude-shared</code> and npm cache mounts.
 <p>Linux defaults to Docker host networking for the loopback registry; Docker Desktop uses
 <code>host.docker.internal</code>. A custom network or remote Docker daemon needs reachable API/registry
 URLs and valid host bind mounts; the overrides are in <a class="repo-ref" href="#source-19" title="Repository reference: harness/.env.example">the env template</a>.
-The first run may clone source and build an image. <code>nanoclaw.json</code> records source/image identity.</p>
+The first run may clone source and build an image. <code>nanoclaw.json</code> records source/image identity.
+With a prepared image manifest, the harness skips source cloning/building and runs the source
+baked into that image instead of mounting it from a checkout. Both paths use the same scenarios.</p>
 <p>NanoClaw can produce another native assistant reply while retrying response formatting.
 Capture checks expect one capture per distinct native reply. This is a documented client
 exception, not permission to ignore duplicate captures. The lane excludes Slack/WhatsApp
@@ -393,6 +403,8 @@ schema. <code>tests/harness-codex-approval.test.mjs</code> covers approval guard
 opt-in real-CLI check without model calls; <code>harness-release-evidence.test.mjs</code> and
 <code>harness-ci-evidence.test.mjs</code> cover export, redaction and gate preservation.
 <code>tests/harness-simple.test.mjs</code> covers cycle selection, unavailable clients and mode labels.
+<code>tests/harness-nanoclaw-package.test.mjs</code> checks package identity, asset integrity, cleanup
+and loading without source preparation.
 The <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design</a> records coverage limits and manual-checklist gaps;
 <a class="repo-ref" href="#source-20" title="Repository reference: docs/testing/validation-2026-09-08.md">validation notes</a> preserve earlier run outcomes.</p>
 <h2 id="what-a-run-leaves-behind">What a run leaves behind</h2>
@@ -486,10 +498,64 @@ Seed during initial setup; it is not a required step before each test run. Add t
 keys afterward. Use <code>bash harness/scripts/local-stack.sh down</code> when finished with the local
 backend; data persists. For an existing staging API, configure its dedicated keys directly
 and skip this helper.</p>
+<h3 id="optional-prepare-nanoclaw-once-then-reuse-or-transfer-it">Optional: prepare NanoClaw once, then reuse or transfer it</h3>
+<p>The default path still fetches the pinned upstream checkout and builds/reuses its base image.
+To make the NanoClaw runtime self-contained, run this separate preparation command from the
+repository root. It needs Git, Docker and build-time network access, but no provider keys,
+MidBrain API or model calls. The destination's parent must exist; the destination itself
+must be new so an earlier package cannot be overwritten.</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-5" type="button">Copy</button><pre aria-label="Code example" id="code-5" tabindex="0"><code class="language-bash">mkdir -p "$HOME/.midbrain-harness/packages"
+node harness/scripts/prepare-nanoclaw.mjs "$HOME/.midbrain-harness/packages/nanoclaw"
+export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$HOME/.midbrain-harness/packages/nanoclaw/nanoclaw-image.json"
+</code></pre></div>
+<p>The command reuses the existing source/base-image preparation, then adds an unmodified
+runner source tree at <code>/app/src</code> and the host's required files under <code>/opt/midbrain-harness</code>:
+agent instructions, mailbox schema, dependency lockfile and upstream license. Only selected
+tracked source files enter the image; no test homes, keys, sessions or captured memories do.
+It writes <code>nanoclaw-image.json</code> and <code>NANOCLAW-LICENSE</code> into the output directory. The image
+stays in local Docker storage, rather than being embedded in those small files.</p>
+<p>The manifest pins the image's immutable SHA-256 ID, upstream revision, Linux architecture,
+lockfile hash and each host asset's hash. On load, the harness inspects that exact local
+image, verifies its identity, copies the four host assets from a stopped container and checks
+their hashes, then removes the temporary container. The runner source executes from the image;
+no NanoClaw checkout is needed. Missing/mismatched images or assets fail before client turns,
+without silently falling back to a build. <code>nanoclaw.json</code> records <code>packaged</code> and <code>platform</code>.</p>
+<p><code>MIDBRAIN_HARNESS_NANOCLAW_MANIFEST</code> takes precedence over the legacy <code>SOURCE</code>/<code>IMAGE</code>
+overrides. Unset it to restore the default path. Preparation itself uses <code>SOURCE</code>/<code>IMAGE</code>
+when provided, allowing reuse of a clean pinned checkout and matching base image. The
+preparation command does not load <code>harness/.env</code>; export those optional overrides explicitly.</p>
+<p>For transfer to another machine, save the image alongside the manifest and license:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-6" type="button">Copy</button><pre aria-label="Code example" id="code-6" tabindex="0"><code class="language-bash">package_dir="$HOME/.midbrain-harness/packages/nanoclaw"
+image_id=$(node --input-type=module -e \
+  'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync(process.argv[1])).imageId)' \
+  "$package_dir/nanoclaw-image.json")
+docker image save -o "$package_dir/nanoclaw-image.tar" "$image_id"
+</code></pre></div>
+<p>Copy that directory to a machine with the same Docker image architecture, then:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-7" type="button">Copy</button><pre aria-label="Code example" id="code-7" tabindex="0"><code class="language-bash">package_dir="/absolute/path/to/copied-nanoclaw-package"
+docker image load -i "$package_dir/nanoclaw-image.tar"
+export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$package_dir/nanoclaw-image.json"
+node harness/run.mjs doctor --clients nanoclaw
+node harness/run.mjs run --mode registry --clients nanoclaw --scenarios s01,s06
+</code></pre></div>
+<p>The last command makes real model calls and requires the normal test credentials/backend.
+Package separately for Linux AMD64 and ARM64; this command builds for the current Docker
+daemon's default platform. Identity matching is not a publisher signature: use a trusted
+image/manifest pair. Rebuilding the upstream base can change image bytes even at the same
+source revision; retaining the built image preserves the exact runtime.</p>
+<p>This packages the NanoClaw lane, not the entire test environment. Docker, Node 24, the harness,
+model providers, the test API and candidate npm installation are still needed. No image
+registry publication or workflow deployment is performed. The checked-in GitHub workflow
+continues to use default source preparation until a prepared image is provisioned and the
+manifest environment variable is configured on its runner.</p>
+<p>Packaging validation (2026-09-10): unit tests cover the build context, manifest/asset
+verification, source-free loading and cleanup. A local image build was attempted, but the
+Docker daemon remained unreachable after <code>docker desktop start</code>; no prepared image or live
+packaged-run pass has been recorded yet. Existing behavioral results predate this option.</p>
 <h3 id="3-pin-models-and-check-readiness">3. Pin models and check readiness</h3>
 <p>This configuration matches the workflow's default model choices. Export it in the shell
 used for the run, or place these values in <code>harness/.env</code> without the <code>export</code> prefix:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-5" type="button">Copy</button><pre aria-label="Code example" id="code-5" tabindex="0"><code class="language-bash">export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-8" type="button">Copy</button><pre aria-label="Code example" id="code-8" tabindex="0"><code class="language-bash">export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
 export MIDBRAIN_HARNESS_OPENCODE_MODEL=anthropic/claude-haiku-4-5
 export MIDBRAIN_HARNESS_HERMES_PROVIDER=anthropic
 export MIDBRAIN_HARNESS_HERMES_MODEL=claude-haiku-4-5
@@ -551,22 +617,22 @@ usage; <code>npm run check</code> does not run a paid behavioral matrix.</p>
 </table></div>
 <p>Run each command as a separate operation; these are alternatives, not a script that must
 execute all paid suites in sequence.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-6" type="button">Copy</button><pre aria-label="Code example" id="code-6" tabindex="0"><code class="language-bash"># Programmatic checks
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-9" type="button">Copy</button><pre aria-label="Code example" id="code-9" tabindex="0"><code class="language-bash"># Programmatic checks
 VITEST_MAX_WORKERS=4 npm run check
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-7" type="button">Copy</button><pre aria-label="Code example" id="code-7" tabindex="0"><code class="language-bash"># Smoke: all five clients, two scenarios
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-10" type="button">Copy</button><pre aria-label="Code example" id="code-10" tabindex="0"><code class="language-bash"># Smoke: all five clients, two scenarios
 node harness/run.mjs run --mode registry --scenarios s01,s06
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-8" type="button">Copy</button><pre aria-label="Code example" id="code-8" tabindex="0"><code class="language-bash"># Simple: all scenarios, reduced cross-client pairing
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-11" type="button">Copy</button><pre aria-label="Code example" id="code-11" tabindex="0"><code class="language-bash"># Simple: all scenarios, reduced cross-client pairing
 node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-9" type="button">Copy</button><pre aria-label="Code example" id="code-9" tabindex="0"><code class="language-bash"># Required: full selection, including upgrades and native Codex approval
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-12" type="button">Copy</button><pre aria-label="Code example" id="code-12" tabindex="0"><code class="language-bash"># Required: full selection, including upgrades and native Codex approval
 node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-10" type="button">Copy</button><pre aria-label="Code example" id="code-10" tabindex="0"><code class="language-bash"># Focused: one cross-client comparison in both directions
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-13" type="button">Copy</button><pre aria-label="Code example" id="code-13" tabindex="0"><code class="language-bash"># Focused: one cross-client comparison in both directions
 node harness/run.mjs run --mode registry --clients codex,nanoclaw --scenarios s02
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-11" type="button">Copy</button><pre aria-label="Code example" id="code-11" tabindex="0"><code class="language-bash"># Focused: previous-release upgrade continuity for Claude
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-14" type="button">Copy</button><pre aria-label="Code example" id="code-14" tabindex="0"><code class="language-bash"># Focused: previous-release upgrade continuity for Claude
 node harness/run.mjs run --mode registry --upgrade --clients claude --scenarios s09
 </code></pre></div>
 <p>The default <code>dev</code> mode runs the extracted candidate directly. Registry mode exercises npm
@@ -644,7 +710,7 @@ cells exit 1; handled interruptions have signal exit codes. A focused/simple run
 without satisfying release coverage. Preserve the command's failure status in scripts; do
 not turn failures into success with <code>|| true</code> or an unchecked pipe to <code>tail</code>.</p>
 <p>To preserve the result while still printing a useful message in a Bash script:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-12" type="button">Copy</button><pre aria-label="Code example" id="code-12" tabindex="0"><code class="language-bash">if node harness/run.mjs run --mode registry --scenarios s01,s06; then
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-15" type="button">Copy</button><pre aria-label="Code example" id="code-15" tabindex="0"><code class="language-bash">if node harness/run.mjs run --mode registry --scenarios s01,s06; then
   run_status=0
 else
   run_status=$?
@@ -658,7 +724,7 @@ exit "$run_status"
 completed private run or exported bundle and needs no extra JSON utility. It prints identity,
 counts, failed check names and evidence paths, rather than dumping credentials or transcripts.
 It is a diagnostic summary, not a replacement for the release verifier.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-13" type="button">Copy</button><pre aria-label="Code example" id="code-13" tabindex="0"><code class="language-bash">run_dir="/absolute/path/to/completed-run"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-16" type="button">Copy</button><pre aria-label="Code example" id="code-16" tabindex="0"><code class="language-bash">run_dir="/absolute/path/to/completed-run"
 node --input-type=module - "$run_dir/results.json" &lt;&lt;'JS'
 import { readFileSync } from 'node:fs';
 const r = JSON.parse(readFileSync(process.argv[2], 'utf8'));
@@ -691,7 +757,7 @@ for (const c of r.cells.filter(c =&gt; c.status !== 'PASS')) {
 JS
 </code></pre></div>
 <p>Rebuild a local report from its existing JSON without rerunning clients:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-14" type="button">Copy</button><pre aria-label="Code example" id="code-14" tabindex="0"><code class="language-bash">node harness/run.mjs report "$run_dir"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-17" type="button">Copy</button><pre aria-label="Code example" id="code-17" tabindex="0"><code class="language-bash">node harness/run.mjs report "$run_dir"
 </code></pre></div>
 <p>This rewrites <code>report.md</code> only. Do not edit files inside a checksummed release bundle;
 regenerate a new export from the original run instead.</p>
@@ -741,7 +807,7 @@ After fixing the cause, run a focused scenario, retain both run IDs, and finally
 required matrix on the intended candidate. A focused fix does not rewrite an old failed gate.</p>
 <h2 id="export-and-verify-release-evidence">Export and verify release evidence</h2>
 <p>Export only completed runs into a new directory outside the private run directory:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-15" type="button">Copy</button><pre aria-label="Code example" id="code-15" tabindex="0"><code class="language-bash">node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-18" type="button">Copy</button><pre aria-label="Code example" id="code-18" tabindex="0"><code class="language-bash">node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
 node harness/scripts/release-evidence.mjs verify \
   /absolute/path/to/new-bundle /absolute/path/to/exact-tested-release.tgz FULL_SOURCE_SHA
 </code></pre></div>
@@ -843,7 +909,7 @@ No PR/release comments or Slack messages are sent by the current workflow.</p>
 and obtain a complete passing required report on the intended candidate plus programmatic
 CI and Radu's review. Exact equivalence with the maintainer's separate manual checklist
 remains unconfirmed. Cloud activation, Slack alerts, broader OS/client behavioral coverage,
-automatic update discovery and real-npm post-publish smoke remain outside current proof.</p><section class="references" id="repository-references"><h2>Repository references</h2><p>These paths identify supporting source files in <code>midbrain-memory-mcp</code>. They are references, not required assets: this HTML file works without the repository or a network connection.</p><dl><div id="source-1"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md</code></dd></div><div id="source-2"><dt>Repository source</dt><dd><code>harness/README.md</code></dd></div><div id="source-3"><dt>Repository source</dt><dd><code>docs/testing/behavioral-ci.md</code></dd></div><div id="source-4"><dt>Repository source</dt><dd><code>.github/workflows/ci.yml</code></dd></div><div id="source-5"><dt>Repository source</dt><dd><code>index.js</code></dd></div><div id="source-6"><dt>Repository source</dt><dd><code>mcp.mjs</code></dd></div><div id="source-7"><dt>Repository source</dt><dd><code>install.mjs</code></dd></div><div id="source-8"><dt>Repository source</dt><dd><code>shared/clients</code></dd></div><div id="source-9"><dt>Repository source</dt><dd><code>shared/midbrain-api.mjs</code></dd></div><div id="source-10"><dt>Repository source</dt><dd><code>shared/agent-rules.mjs</code></dd></div><div id="source-11"><dt>Repository source</dt><dd><code>plugins/claude-code</code></dd></div><div id="source-12"><dt>Repository source</dt><dd><code>plugins/codex</code></dd></div><div id="source-13"><dt>Repository source</dt><dd><code>plugins/hermes</code></dd></div><div id="source-14"><dt>Repository source</dt><dd><code>plugins/opencode/midbrain-memory.ts</code></dd></div><div id="source-15"><dt>Repository source</dt><dd><code>dist/midbrain-shared.mjs</code></dd></div><div id="source-16"><dt>Repository source</dt><dd><code>skills/nanoclaw</code></dd></div><div id="source-17"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes</code></dd></div><div id="source-18"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership</code></dd></div><div id="source-19"><dt>Repository source</dt><dd><code>harness/.env.example</code></dd></div><div id="source-20"><dt>Repository source</dt><dd><code>docs/testing/validation-2026-09-08.md</code></dd></div><div id="source-21"><dt>Repository source</dt><dd><code>docs/releases/README.md#release-validation-checklist</code></dd></div><div id="source-22"><dt>Repository source</dt><dd><code>.github/workflows/behavioral.yml</code></dd></div></dl></section></article><footer class="footer">MidBrain Memory MCP · Documentation snapshot, 2026-09-09.<br>Source: <code>docs/testing/harness-how-it-works.md</code>. This page is a guide, not live run evidence.</footer></main></div><div class="copy-status" role="status" aria-live="polite"></div><script>
+automatic update discovery and real-npm post-publish smoke remain outside current proof.</p><section class="references" id="repository-references"><h2>Repository references</h2><p>These paths identify supporting source files in <code>midbrain-memory-mcp</code>. They are references, not required assets: this HTML file works without the repository or a network connection.</p><dl><div id="source-1"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md</code></dd></div><div id="source-2"><dt>Repository source</dt><dd><code>harness/README.md</code></dd></div><div id="source-3"><dt>Repository source</dt><dd><code>docs/testing/behavioral-ci.md</code></dd></div><div id="source-4"><dt>Repository source</dt><dd><code>.github/workflows/ci.yml</code></dd></div><div id="source-5"><dt>Repository source</dt><dd><code>index.js</code></dd></div><div id="source-6"><dt>Repository source</dt><dd><code>mcp.mjs</code></dd></div><div id="source-7"><dt>Repository source</dt><dd><code>install.mjs</code></dd></div><div id="source-8"><dt>Repository source</dt><dd><code>shared/clients</code></dd></div><div id="source-9"><dt>Repository source</dt><dd><code>shared/midbrain-api.mjs</code></dd></div><div id="source-10"><dt>Repository source</dt><dd><code>shared/agent-rules.mjs</code></dd></div><div id="source-11"><dt>Repository source</dt><dd><code>plugins/claude-code</code></dd></div><div id="source-12"><dt>Repository source</dt><dd><code>plugins/codex</code></dd></div><div id="source-13"><dt>Repository source</dt><dd><code>plugins/hermes</code></dd></div><div id="source-14"><dt>Repository source</dt><dd><code>plugins/opencode/midbrain-memory.ts</code></dd></div><div id="source-15"><dt>Repository source</dt><dd><code>dist/midbrain-shared.mjs</code></dd></div><div id="source-16"><dt>Repository source</dt><dd><code>skills/nanoclaw</code></dd></div><div id="source-17"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes</code></dd></div><div id="source-18"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership</code></dd></div><div id="source-19"><dt>Repository source</dt><dd><code>harness/.env.example</code></dd></div><div id="source-20"><dt>Repository source</dt><dd><code>docs/testing/validation-2026-09-08.md</code></dd></div><div id="source-21"><dt>Repository source</dt><dd><code>docs/releases/README.md#release-validation-checklist</code></dd></div><div id="source-22"><dt>Repository source</dt><dd><code>.github/workflows/behavioral.yml</code></dd></div></dl></section></article><footer class="footer">MidBrain Memory MCP · Documentation snapshot, 2026-09-10.<br>Source: <code>docs/testing/harness-how-it-works.md</code>. This page is a guide, not live run evidence.</footer></main></div><div class="copy-status" role="status" aria-live="polite"></div><script>
 const notice=document.querySelector('.copy-status');
 function announce(message){notice.textContent=message;notice.classList.add('visible');setTimeout(()=>notice.classList.remove('visible'),2200)}
 async function copyCode(button){const value=document.getElementById(button.dataset.copy).textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(value)}else{const area=document.createElement('textarea');area.value=value;area.style.cssText='position:fixed;left:-9999px;top:0';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();button.focus();if(!ok)throw Error('Clipboard unavailable')}button.textContent='Copied';announce('Code copied');setTimeout(()=>button.textContent='Copy',1800)}catch{announce('Select the code and copy it manually.')}}

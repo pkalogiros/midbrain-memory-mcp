@@ -128,6 +128,26 @@ This lane covers MCP integration through the real runner. Slack/WhatsApp deliver
 routing, OneCLI gateway provisioning, and other NanoClaw providers are outside its scope.
 The manual workflow is built; runner activation, Linux validation and release enforcement remain separate work.
 
+### Optional self-contained NanoClaw image
+
+Prepare the pinned runner once, without provider keys or model calls:
+
+```bash
+mkdir -p "$HOME/.midbrain-harness/packages"
+node harness/scripts/prepare-nanoclaw.mjs "$HOME/.midbrain-harness/packages/nanoclaw"
+export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$HOME/.midbrain-harness/packages/nanoclaw/nanoclaw-image.json"
+```
+
+This builds a local image containing the runner source, required host assets and upstream
+license. The manifest pins the image ID, revision, platform and asset hashes. With this
+variable set, runs use the exact prepared image and do not clone NanoClaw or mount a source
+checkout. Unset it to use the existing preparation path. Images must already be present;
+the harness does not pull or publish them. The preparation command uses exported environment
+overrides, not `harness/.env`.
+
+See the [packaging and transfer instructions](../docs/testing/harness-how-it-works.md#optional-prepare-nanoclaw-once-then-reuse-or-transfer-it)
+for `docker save`/`load`, architecture requirements and remaining runtime dependencies.
+
 ### Trustworthy runs
 
 `run` builds and preserves a candidate tarball plus its SHA-256, extracted runtime,

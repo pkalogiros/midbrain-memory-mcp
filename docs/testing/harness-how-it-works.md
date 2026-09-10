@@ -2,7 +2,7 @@
 
 Companion to the [design and coverage map](multi-client-harness.md),
 [CLI commands](../../harness/README.md), and [workflow setup](behavioral-ci.md).
-Updated 2026-09-09 against branch `multi-client-test-harness`.
+Updated 2026-09-10 against branch `multi-client-harness-review`.
 
 Start with [architecture](#architecture) to understand the system, [local setup](#local-setup)
 to prepare a machine, [run recipes](#choose-and-run-a-suite) to execute it, or
@@ -194,6 +194,8 @@ capture draining during plugin disposal (`03b6271`). See the
 | `harness/scripts/ci-evidence.mjs` | Builds the GitHub summary and bundle; incomplete runs receive an incomplete summary, not passing evidence. |
 | `harness/lib/nanoclaw.mjs` | The NanoClaw runtime: clones a pinned upstream revision, builds or reuses its image, creates groups, runs one container per turn, collects transcripts. |
 | `harness/lib/nanoclaw-mailbox.mjs` | The SQLite mailbox NanoClaw reads from and writes to; the harness enqueues inbound messages and reads replies. Needs Node 24. |
+| `harness/lib/nanoclaw-package.mjs` | Pinned upstream identity and validation contract for an optional self-contained runtime image. |
+| `harness/scripts/prepare-nanoclaw.mjs`, `harness/container/Dockerfile` | Build a local packaging layer containing the runner, host assets and upstream license; produce a manifest without running models or publishing. |
 | `harness/container/nanoclaw-probe.mjs` | Runs inside the NanoClaw image to list MCP tools; a readiness probe, not behavioural evidence. |
 | `harness/scripts/local-stack.sh` | `up`, `seed`, `status`, `down` for the local MidBrain API stack from the `memory` repo via docker compose; `seed` mints two test agents into `.env`. |
 
@@ -250,6 +252,8 @@ Linux defaults to Docker host networking for the loopback registry; Docker Deskt
 `host.docker.internal`. A custom network or remote Docker daemon needs reachable API/registry
 URLs and valid host bind mounts; the overrides are in [the env template](../../harness/.env.example).
 The first run may clone source and build an image. `nanoclaw.json` records source/image identity.
+With a prepared image manifest, the harness skips source cloning/building and runs the source
+baked into that image instead of mounting it from a checkout. Both paths use the same scenarios.
 
 NanoClaw can produce another native assistant reply while retrying response formatting.
 Capture checks expect one capture per distinct native reply. This is a documented client
@@ -266,6 +270,8 @@ schema. `tests/harness-codex-approval.test.mjs` covers approval guards and offer
 opt-in real-CLI check without model calls; `harness-release-evidence.test.mjs` and
 `harness-ci-evidence.test.mjs` cover export, redaction and gate preservation.
 `tests/harness-simple.test.mjs` covers cycle selection, unavailable clients and mode labels.
+`tests/harness-nanoclaw-package.test.mjs` checks package identity, asset integrity, cleanup
+and loading without source preparation.
 The [design](multi-client-harness.md) records coverage limits and manual-checklist gaps;
 [validation notes](validation-2026-09-08.md) preserve earlier run outcomes.
 
@@ -357,6 +363,76 @@ Seed during initial setup; it is not a required step before each test run. Add t
 keys afterward. Use `bash harness/scripts/local-stack.sh down` when finished with the local
 backend; data persists. For an existing staging API, configure its dedicated keys directly
 and skip this helper.
+
+### Optional: prepare NanoClaw once, then reuse or transfer it
+
+The default path still fetches the pinned upstream checkout and builds/reuses its base image.
+To make the NanoClaw runtime self-contained, run this separate preparation command from the
+repository root. It needs Git, Docker and build-time network access, but no provider keys,
+MidBrain API or model calls. The destination's parent must exist; the destination itself
+must be new so an earlier package cannot be overwritten.
+
+```bash
+mkdir -p "$HOME/.midbrain-harness/packages"
+node harness/scripts/prepare-nanoclaw.mjs "$HOME/.midbrain-harness/packages/nanoclaw"
+export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$HOME/.midbrain-harness/packages/nanoclaw/nanoclaw-image.json"
+```
+
+The command reuses the existing source/base-image preparation, then adds an unmodified
+runner source tree at `/app/src` and the host's required files under `/opt/midbrain-harness`:
+agent instructions, mailbox schema, dependency lockfile and upstream license. Only selected
+tracked source files enter the image; no test homes, keys, sessions or captured memories do.
+It writes `nanoclaw-image.json` and `NANOCLAW-LICENSE` into the output directory. The image
+stays in local Docker storage, rather than being embedded in those small files.
+
+The manifest pins the image's immutable SHA-256 ID, upstream revision, Linux architecture,
+lockfile hash and each host asset's hash. On load, the harness inspects that exact local
+image, verifies its identity, copies the four host assets from a stopped container and checks
+their hashes, then removes the temporary container. The runner source executes from the image;
+no NanoClaw checkout is needed. Missing/mismatched images or assets fail before client turns,
+without silently falling back to a build. `nanoclaw.json` records `packaged` and `platform`.
+
+`MIDBRAIN_HARNESS_NANOCLAW_MANIFEST` takes precedence over the legacy `SOURCE`/`IMAGE`
+overrides. Unset it to restore the default path. Preparation itself uses `SOURCE`/`IMAGE`
+when provided, allowing reuse of a clean pinned checkout and matching base image. The
+preparation command does not load `harness/.env`; export those optional overrides explicitly.
+
+For transfer to another machine, save the image alongside the manifest and license:
+
+```bash
+package_dir="$HOME/.midbrain-harness/packages/nanoclaw"
+image_id=$(node --input-type=module -e \
+  'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync(process.argv[1])).imageId)' \
+  "$package_dir/nanoclaw-image.json")
+docker image save -o "$package_dir/nanoclaw-image.tar" "$image_id"
+```
+
+Copy that directory to a machine with the same Docker image architecture, then:
+
+```bash
+package_dir="/absolute/path/to/copied-nanoclaw-package"
+docker image load -i "$package_dir/nanoclaw-image.tar"
+export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$package_dir/nanoclaw-image.json"
+node harness/run.mjs doctor --clients nanoclaw
+node harness/run.mjs run --mode registry --clients nanoclaw --scenarios s01,s06
+```
+
+The last command makes real model calls and requires the normal test credentials/backend.
+Package separately for Linux AMD64 and ARM64; this command builds for the current Docker
+daemon's default platform. Identity matching is not a publisher signature: use a trusted
+image/manifest pair. Rebuilding the upstream base can change image bytes even at the same
+source revision; retaining the built image preserves the exact runtime.
+
+This packages the NanoClaw lane, not the entire test environment. Docker, Node 24, the harness,
+model providers, the test API and candidate npm installation are still needed. No image
+registry publication or workflow deployment is performed. The checked-in GitHub workflow
+continues to use default source preparation until a prepared image is provisioned and the
+manifest environment variable is configured on its runner.
+
+Packaging validation (2026-09-10): unit tests cover the build context, manifest/asset
+verification, source-free loading and cleanup. A local image build was attempted, but the
+Docker daemon remained unreachable after `docker desktop start`; no prepared image or live
+packaged-run pass has been recorded yet. Existing behavioral results predate this option.
 
 ### 3. Pin models and check readiness
 

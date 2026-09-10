@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 // messages, invokes capture hooks, or patches the runner/provider source.
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync, rmSync, lstatSync } from 'node:fs';
 import { spawnCapture } from './proc.mjs';
 import { BlockedError } from './checks.mjs';
 import { childEnv, HARNESS_DIR } from './context.mjs';
@@ -12,8 +12,8 @@ import { walk } from './evidence.mjs';
 import { HarnessApi, sleep } from './api.mjs';
 import { createMailbox, enqueue, readMailbox } from './nanoclaw-mailbox.mjs';
 
-export const NANOCLAW_SHA = '6656b326a900dcfba4be8ca76412d954cfc915b5';
-export const NANOCLAW_REPO = 'https://github.com/nanocoai/nanoclaw.git';
+import { NANOCLAW_SHA, NANOCLAW_REPO, PACKAGE_ASSETS, validatePackage } from './nanoclaw-package.mjs';
+export { NANOCLAW_SHA, NANOCLAW_REPO };
 export const CAPTURE_CWD = '/workspace/agent';
 // Dev packages live in a temporary install context so product self-repair does
 // not replace the frozen dev hooks with registry hooks. Registry mode uses npx.
@@ -124,7 +124,7 @@ export class NanoClawRuntime {
     } finally { await this.removeContainer(name); }
   }
 
-  async prepare() {
+  async prepareSourceImage() {
     mkdirSync(this.root, { recursive: true });
     const source = process.env.MIDBRAIN_HARNESS_NANOCLAW_SOURCE;
     const checkout = path.join(this.ctx.dirs.tools, 'nanoclaw-checkout');
@@ -143,7 +143,7 @@ export class NanoClawRuntime {
     // ignored .env files in a developer's source checkout must stay there.
     const tree = await spawnCapture('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: src, env: childEnv(this.ctx) });
     if (tree.code !== 0) throw new BlockedError('Cannot enumerate pinned NanoClaw source');
-    const roots = ['container/Dockerfile', 'container/entrypoint.sh', 'container/cli-tools.json', 'container/install-cli-tools.sh', 'container/CLAUDE.md', 'container/agent-runner/package.json', 'container/agent-runner/bun.lock', 'src/mailbox/sqlite/schema.ts'];
+    const roots = ['LICENSE', 'container/Dockerfile', 'container/entrypoint.sh', 'container/cli-tools.json', 'container/install-cli-tools.sh', 'container/CLAUDE.md', 'container/agent-runner/package.json', 'container/agent-runner/bun.lock', 'src/mailbox/sqlite/schema.ts'];
     for (const rel of tree.stdout.trim().split('\n').filter(rel => roots.includes(rel) || rel.startsWith('container/agent-runner/src/'))) {
       const target = path.join(this.root, rel);
       mkdirSync(path.dirname(target), { recursive: true });
@@ -162,6 +162,41 @@ export class NanoClawRuntime {
     }
     const base = JSON.parse(inspected.stdout)[0];
     if (base.Config?.Labels?.['dev.nanoclaw.agent-runner-lock-sha256'] !== lockHash) throw new BlockedError('NanoClaw image lockfile label does not match the pinned source; rebuild the image');
+    return { base, lockHash };
+  }
+
+  async preparePackagedImage(file) {
+    const manifest = JSON.parse(readFileSync(path.resolve(file), 'utf8'));
+    // Inspect immutable content identity, never resolve a mutable tag or pull implicitly.
+    if (!/^sha256:[a-f0-9]{64}$/.test(manifest.imageId)) throw new BlockedError('NanoClaw manifest needs an immutable image ID');
+    const inspected = await this.docker(['image', 'inspect', manifest.imageId]);
+    if (inspected.code !== 0) throw new BlockedError('Prepared NanoClaw image is missing; build it or docker load its archive first');
+    const base = JSON.parse(inspected.stdout)[0];
+    validatePackage(manifest, base);
+    const name = 'mbh-nano-' + randomUUID();
+    this.containers.add(name);
+    try {
+      // Copy only required host assets out of a stopped container; no image code runs here.
+      await this.checkedDocker(['create', '--name', name, '--label', 'dev.midbrain.harness.run=' + this.ctx.runId, '--entrypoint', '/bin/true', base.Id]);
+      for (const file of PACKAGE_ASSETS) {
+        const target = path.join(this.root, file);
+        mkdirSync(path.dirname(target), { recursive: true });
+        await this.checkedDocker(['cp', name + ':/opt/midbrain-harness/' + file, target]);
+        if (!lstatSync(target).isFile() || hash(target) !== manifest.assets[file]) throw new Error('NanoClaw packaged asset mismatch: ' + file);
+      }
+    } finally { await this.removeContainer(name); }
+    this.packaged = true;
+    return { base, lockHash: manifest.lockHash };
+  }
+
+  runnerMountArgs() {
+    return this.packaged ? [] : this.mount(path.join(this.root, 'container/agent-runner/src'), '/app/src', true);
+  }
+
+  async prepare() {
+    const manifest = process.env.MIDBRAIN_HARNESS_NANOCLAW_MANIFEST;
+    const { base, lockHash } = manifest ? await this.preparePackagedImage(manifest) : await this.prepareSourceImage();
+    mkdirSync(path.join(this.root, '.claude/skills'), { recursive: true });
     this.baseImage = base.Id;
     this.image = base.Id;
     if (this.candidate.mode === 'dev') {
@@ -180,7 +215,7 @@ export class NanoClawRuntime {
       this.image = JSON.parse((await this.checkedDocker(['image', 'inspect', tag])).stdout)[0].Id;
       this.tarballSha256 = hash(tarball);
     }
-    this.identity = { sourceSha: NANOCLAW_SHA, baseImage: base.Id, image: this.image, lockHash, tarballSha256: this.tarballSha256 || null, mode: this.candidate.mode };
+    this.identity = { sourceSha: NANOCLAW_SHA, baseImage: base.Id, image: this.image, lockHash, packaged: Boolean(this.packaged), platform: `${base.Os}/${base.Architecture}`, tarballSha256: this.tarballSha256 || null, mode: this.candidate.mode };
     writeJson(path.join(this.ctx.dirs.run, 'nanoclaw.json'), this.identity);
   }
 
@@ -279,7 +314,7 @@ export class NanoClawRuntime {
     let mailboxError = '';
     this.containers.add(container);
     try {
-      await this.checkedDocker(['run', '-d', ...this.userArgs(group.npm), '--name', container, '--label', 'dev.midbrain.harness.run=' + this.ctx.runId, '--init', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '2g', ...this.networkArgs(), ...this.mount(session.dir, '/workspace'), ...this.mount(path.join(session.dir, 'inbound.db'), '/workspace/inbound.db', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.instructions, CAPTURE_CWD + '/instructions.prepend.md', true), ...this.mount(path.join(group.agent, 'container.json'), CAPTURE_CWD + '/container.json', true), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.mount(path.join(this.root, 'container/agent-runner/src'), '/app/src', true), '--env-file', group.envFile, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', 'bun', this.image, 'run', '/app/src/index.ts']);
+      await this.checkedDocker(['run', '-d', ...this.userArgs(group.npm), '--name', container, '--label', 'dev.midbrain.harness.run=' + this.ctx.runId, '--init', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '2g', ...this.networkArgs(), ...this.mount(session.dir, '/workspace'), ...this.mount(path.join(session.dir, 'inbound.db'), '/workspace/inbound.db', true), ...this.mount(group.agent, CAPTURE_CWD), ...this.mount(group.instructions, CAPTURE_CWD + '/instructions.prepend.md', true), ...this.mount(path.join(group.agent, 'container.json'), CAPTURE_CWD + '/container.json', true), ...this.mount(group.claude, '/home/node/.claude'), ...this.mount(group.logs, '/workspace/logs'), ...this.mount(group.logs, '/home/node/.local/state/midbrain'), ...this.runnerMountArgs(), '--env-file', group.envFile, ...this.registryEnv(), '--workdir', CAPTURE_CWD, '--entrypoint', 'bun', this.image, 'run', '/app/src/index.ts']);
       const deadline = started + Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
       while (Date.now() < deadline) {
         try { snapshot = await readMailbox(session.dir, inboundId); } catch (e) {
