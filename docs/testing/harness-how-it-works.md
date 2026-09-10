@@ -7,6 +7,8 @@ Updated 2026-09-10 against branch `multi-client-harness-review`.
 Start with [architecture](#architecture) to understand the system, [local setup](#local-setup)
 to prepare a machine, [run recipes](#choose-and-run-a-suite) to execute it, or
 [reading results](#how-to-read-and-parse-results) to investigate an existing run.
+For changes to coverage, see [prompt locations](#where-to-find-and-edit-the-prompts).
+For command options, see the [argument reference](#commands-and-arguments).
 
 ## What it is
 
@@ -165,10 +167,14 @@ All paths below are relative to this repository. The harness is development tool
 | [skills/nanoclaw/](../../skills/nanoclaw/) | Product integration instructions/configuration for a NanoClaw group. NanoClaw uses the Claude capture handlers with its own client identity. |
 
 Four product changes accompanied this testing work and require release review separately
-from the harness: synchronous Claude Stop plus migration (`f84c5f6`), recognized NanoClaw
-envelope decoding (`5b1f1fe`), managed memory-first/full-anchor rules (`477bd79`), and OpenCode
-capture draining during plugin disposal (`03b6271`). See the
+from the harness: synchronous Claude Stop plus migration (`e4e2fc2`), recognized NanoClaw
+envelope decoding (`5e9b9e4`), managed memory-first/full-anchor rules (`113016c`), and OpenCode
+capture draining during plugin disposal (`0dd4826`). See the
 [release review boundaries](multi-client-harness.md#release-review-for-the-hardening-changes) for details.
+Commit titles were normalized on 2026-09-10. Earlier documents and run evidence retain the
+original SHAs (`f84c5f6`, `5b1f1fe`, `477bd79`, `03b6271` respectively); that history is
+preserved on `multi-client-harness-review-before-retitle`. Rewording a commit does not make
+an old report validate the new source SHA.
 
 ### Entry point and libraries
 
@@ -274,6 +280,54 @@ opt-in real-CLI check without model calls; `harness-release-evidence.test.mjs` a
 and loading without source preparation.
 The [design](multi-client-harness.md) records coverage limits and manual-checklist gaps;
 [validation notes](validation-2026-09-08.md) preserve earlier run outcomes.
+
+## Where to find and edit the prompts
+
+**Prompt templates live in code, not in a separate prompt file or the client manifests.**
+The scenario builds each prompt with the run marker and, where needed, fresh hidden values.
+The same shared scenario runs against each selected client's driver. NanoClaw lifecycle
+cases and the upgrade prelude have their own prompt definitions.
+
+| Prompt family | Source to edit |
+|---|---|
+| S1 capture | [harness/scenarios/s01-capture.mjs](../../harness/scenarios/s01-capture.mjs) — `prompt` |
+| S2 cross-client writer and reader | [harness/scenarios/s02-cross-client-recall.mjs](../../harness/scenarios/s02-cross-client-recall.mjs) — `writePrompt` and `readPrompt` |
+| S3 fresh-session checkpoint and recall | [harness/scenarios/s03-fresh-session-continuity.mjs](../../harness/scenarios/s03-fresh-session-continuity.mjs) — `p1` and `p2` |
+| S4 project/global scope | [harness/scenarios/s04-project-global-isolation.mjs](../../harness/scenarios/s04-project-global-isolation.mjs) |
+| S5 current vs stale value | [harness/scenarios/s05-freshness-reconciliation.mjs](../../harness/scenarios/s05-freshness-reconciliation.mjs) |
+| S6 clean unrelated answer | [harness/scenarios/s06-no-match-clean.mjs](../../harness/scenarios/s06-no-match-clean.mjs) |
+| S8 literal markers | [harness/scenarios/s08-marker-robustness.mjs](../../harness/scenarios/s08-marker-robustness.mjs) |
+| S9 previous-release capture, new capture and recall | [harness/lib/upgrade.mjs](../../harness/lib/upgrade.mjs) — the S9 scenario file reports the prelude's results |
+| S10 native approval, consent, repair and plugin cases | [harness/scenarios/s10-client-specific.mjs](../../harness/scenarios/s10-client-specific.mjs) |
+| NanoClaw cold wake, resume and legacy opener | [harness/scenarios/nanoclaw-lifecycle.mjs](../../harness/scenarios/nanoclaw-lifecycle.mjs) |
+
+For example, S2's source templates are:
+
+```js
+const writePrompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it and acknowledge briefly.`;
+const readPrompt = `Search your MidBrain memory for task ${m} and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say "not found after search".`;
+```
+
+`${m}` is the retrieval anchor; `${value}` is generated for the writer. The reader must
+recover the value through MidBrain. Giving the value to the reader would invalidate the test.
+`--simple` selects fewer S2 pairs; it uses these same prompts and checks.
+
+To inspect **what was actually sent**, open the private run's
+`evidence/<client>/<scenario>/<label>.prompt.json`. The shared
+[runTurn helper](../../harness/scenarios/_shared.mjs) writes this before launching the client.
+For example, OpenCode writing for Claude in S2 produces
+`evidence/opencode/s02-cross-client-recall/write-for-claude.prompt.json`.
+The file includes `prompt`, `project` and session/resume options. A saved prompt alone does
+not prove execution completed; check its normalized turn and result cells too.
+
+These files record the harness's input, not the entire provider request. Client instructions,
+tool definitions, conversation history and NanoClaw transport wrappers can add context.
+Inspect native evidence when those additional inputs matter. S7 has no separate prompt:
+its compliance checks operate inside S2/S3/S5.
+
+When editing a prompt, review its expected outcome and deterministic checks together, keep
+hidden values out of reader prompts, then run the focused scenario. Keep the old evidence;
+a prompt change needs a new run. There is no CLI `--prompt` override.
 
 ## What a run leaves behind
 
@@ -463,6 +517,61 @@ can launch several fresh sessions, and a prompt can require several provider cal
 report cell is an assertion group, not a billable model call. The four Anthropic clients
 and API-authenticated Codex bill their respective providers; runner costs are separate.
 
+The workflow also offers `claude-sonnet-5` for the four Anthropic-backed clients. These are
+the model identifiers configured in the repository, not a claim that every account has
+access or that either model has produced a green required gate. Switching models changes
+the tested configuration and requires new evidence.
+
+## Cost and duration by run type
+
+These are historical observations from local runs, not all-inclusive budgets. Wall-clock
+figures come from completed run metadata; spend is approximate, as recorded in the
+[historical review](review-2026-09-09.md#cost-and-model-choice). Claude/OpenCode expose cost
+fields, NanoClaw estimates use transcript usage, and Hermes accounting is incomplete.
+Codex costs, runner charges and backend costs are excluded from the Anthropic figures.
+The historical Codex runs used a ChatGPT login; the workflow uses separately billed OpenAI API auth.
+
+| Run type | Scope and models | Observed duration | Historical Anthropic spend | Evidence / limitation |
+|---|---|---|---|---|
+| Programmatic | Build, lint, tests, isolation; no models | Varies by machine; recent local checks under 2 min | $0 model usage | Not a behavioral matrix; runner compute still has a cost. |
+| Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | About 2 min | Under $0.15 | `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
+| Focused | One/two clients and selected scenarios | Depends on selection; one retained run took about 6 min | Varies | `20260908-090053-5472`; a targeted run is not comparable to full coverage. |
+| Simple | Five clients, all scenarios, upgrades, five S2 links | Not yet measured in a completed run recorded here | Not yet measured | Saves 30 S2 prompts; no measured simple/full token-cost ratio. |
+| Full matrix | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
+| Required attempt | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
+
+Fixed indexing/readback waits, container startup, tool output, model latency, context and
+native retries all affect the total. A prompt can trigger several provider calls, so neither
+prompt count nor the number of result cells is a reliable bill by itself.
+
+### Model prices and planning estimates
+
+Anthropic's standard Claude API rates, checked 2026-09-10, are below in USD per million
+tokens. [Official pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+
+| Model | Uncached input | 5-minute cache write | 1-hour cache write | Cache read | Output |
+|---|---|---|---|---|---|
+| Haiku 4.5 | $1 | $1.25 | $2 | $0.10 | $5 |
+| Sonnet 5 | $2 | $2.50 | $4 | $0.20 | $10 |
+
+**Illustrative estimate:** holding token counts and cache categories constant, Sonnet 5 costs
+2× Haiku 4.5 at these rates. The historical approximately $2 Haiku broad run would therefore
+translate to approximately $4 for its Anthropic portion under that assumption. This is not
+an observed Sonnet result or a spending cap. Anthropic notes tokenizer differences in newer
+models; actual token counts, answers, tool calls and retries can change.
+[Pricing and tokenizer notes](https://platform.claude.com/docs/en/about-claude/pricing).
+
+For your own estimate, use `sum(tokens_in_category × category_rate / 1,000,000)` across clients,
+then add Codex API usage and runner/backend charges. Check account-specific pricing before
+budgeting. No completed simple-mode cost measurement is recorded here, so do not scale the
+whole bill by its 75% reduction in S2 pairs. The harness has no dollar-budget flag or automatic
+billing cutoff; timeouts limit duration, not spend.
+
+The workflow offers Haiku 4.5 and Sonnet 5 for the Anthropic clients. Neither a cheaper model
+nor a more capable model automatically establishes sign-off: record the selected models and
+obtain a passing required run. Marker, recall and format failures remain failures until
+triaged; they are not automatically waived as model noise.
+
 ## Choose and run a suite
 
 Start with a programmatic check, then smoke, then simple for broader iteration. Run required
@@ -476,6 +585,10 @@ usage; `npm run check` does not run a paid behavioral matrix.
 | Simple | All scenarios and upgrades, with one cross-client cycle | No |
 | Required | All scenarios, upgrades and every ordered cross-client pair | Yes, if complete, all checks pass and evidence verifies |
 | Focused | Selected clients/scenarios while diagnosing a failure | No |
+
+“Light” means **simple** in this guide; there is no `--light` flag. Smoke is smaller again.
+“Full” means all ordered pairs; use `--required` with registry+upgrade when collecting
+release evidence. Omitting `--simple` alone does not mark the run as required.
 
 Run each command as a separate operation; these are alternatives, not a script that must
 execute all paid suites in sequence.
@@ -542,6 +655,42 @@ Default capture readback waits up to 90 seconds, polling every 5 seconds and che
 to a 300-second timeout. These are waiting bounds, not automatic reruns of failed scenarios.
 Tune through the documented env template/CLI flags only when investigating measured delays.
 Record the changed configuration and keep the original failed run.
+
+## Commands and arguments
+
+Run `node harness/run.mjs help` for the CLI's own summary. The following describes the
+current implementation; boolean switches are supplied without a value (omit a switch to
+disable it, rather than writing `--simple=false`).
+
+| Command | Purpose and accepted inputs |
+|---|---|
+| `doctor` | Readiness checks; optional `--clients` and `--root`. No paid model calls. |
+| `freeze` | Build/package/extract the candidate and print its identity; optional `--mode`, default `dev`. Does not start a registry or run scenarios. |
+| `run` | Execute selected clients/scenarios, using the flags below. |
+| `report <runDir>` | Regenerate `report.md` from completed `results.json`; no model calls. |
+| `help` | Show command usage, client IDs and scenario IDs. |
+
+| Run flag | Default | Meaning / constraints |
+|---|---|---|
+| `--clients opencode,claude,codex,hermes,nanoclaw` | All five | Select clients by ID; manifest order controls execution and simple-cycle order. Forbidden with `--required`. |
+| `--scenarios s01,s06` | All implemented scenarios | Comma-separated short IDs or full scenario IDs. No S7 driver. Forbidden with `--required`. |
+| `--mode dev` or `--mode registry` | `dev` | Direct extracted candidate or loopback npm installation. |
+| `--upgrade` | Off | Previous-release upgrade prelude; requires registry mode. |
+| `--simple` | Off | One directed S2 cycle; other selected checks unchanged. Incompatible with `--required`. |
+| `--required` | Off | Full client/scenario selection and all ordered pairs; requires registry+upgrade, forbids filters and simple mode. |
+| `--approve-codex-hooks` | Off | Native Codex approval automation for S10; pinned client and Python 3 required. |
+| `--interactive` | Off | Manual terminal alternative for S10 approval. Choose one approval mode. |
+| `--root /absolute/path` | `MIDBRAIN_HARNESS_ROOT`, otherwise `~/.midbrain-harness` | Parent of `runs/<run-id>`; must be outside temporary directories. |
+| `--readback-timeout-ms 90000` | Env override, otherwise `90000` | Maximum capture readback wait; env: `MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS`. |
+| `--index-grace-ms 20000` | Env override, otherwise `20000` | Indexing delay before recall where used; env: `MIDBRAIN_HARNESS_INDEX_GRACE_MS`. |
+| `--poll-interval-ms 5000` | `5000` | Readback polling interval; supported in code though omitted from the compact CLI help. |
+| `--keep` | Off; no behavioral effect | Currently parsed but not used. Local run directories are retained regardless; containers/registry still undergo normal cleanup. |
+
+Client turn timeout is an environment setting, `MIDBRAIN_HARNESS_TURN_TIMEOUT_MS`, not a
+`--turn-timeout-ms` flag. Export it in the shell before launching the CLI: some adapters read
+it during module import, before `.env` loads. Model pins and the NanoClaw package manifest
+are also environment settings, as documented above. The CLI currently does not reject every
+unknown option; use the supported names rather than assuming an extra flag took effect.
 
 ## How to read and parse results
 
@@ -742,12 +891,13 @@ No PR/release comments or Slack messages are sent by the current workflow.
 
 This is a dated checkpoint, not a live status dashboard:
 
-| Area | Implemented | Recorded validation as of 2026-09-09 |
+| Area | Implemented | Recorded validation as of 2026-09-10 |
 |---|---|---|
-| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence and simple-mode tests | After simple mode: 1,332 tests passed, 3 skipped, plus 224 copied-topology isolation checks. |
+| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,337 tests passed, 3 skipped, plus 224 copied-topology isolation checks. |
 | Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Approval driver checked in six fresh macOS homes without model calls; earlier opt-in full check passed 1,324 tests plus 224 isolation checks. Linux remains unvalidated. |
 | Five-client behavioral matrix | All adapters and scenarios described above | Completed broad run `20260909-083452-4fdd`: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate `6d6fc58`; `required: false`. It predates approval automation and simple mode. |
 | Simple cycle | Pair selection, labels, reports, export/CI support | Unit-tested; no recorded live simple matrix yet. |
+| Self-contained NanoClaw runtime | Local image preparation, embedded runner/assets/license, manifest and hash verification | Unit-tested; the local build attempt was blocked by an unreachable Docker daemon. No prepared-image behavioral run is validated. |
 | Release evidence | Selected redacted export and strict candidate verification | Export/verifier tests; no complete green required evidence for the intended current candidate. |
 | Manual GitHub workflow | Suite/model inputs, setup, execution, artifacts, cleanup | Built and statically checked; not deployed or run on a cloud runner. Slack alerts are not built. |
 

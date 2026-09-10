@@ -8,13 +8,15 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.copy-status{transition:none}}
 @media print{@page{margin:16mm}body{background:white;color:#222;font-size:10pt;line-height:1.55}.layout{display:block;padding:0}.sidebar,.skip,.copy,.copy-status{display:none}.main{max-width:none}.hero{padding:0 0 20px}.hero h1{font-size:32pt}.hero .deck{font-size:12pt}.hero .tags{margin-top:10px}article h2{font-size:22pt;margin-top:30px;break-after:avoid}article h3{font-size:14pt;break-after:avoid}.table-scroll{overflow:visible}table{font-size:9pt}td,th{padding:8px;min-width:0!important}.diagram{break-inside:avoid}.diagram-scroll{overflow:visible}.diagram svg{min-width:0}.diagram figcaption{font-size:8pt}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4ef;color:#173b33;font-size:8pt;border:1px solid #c9d8cc;break-inside:avoid}a{color:inherit}tr{break-inside:avoid}.references{break-before:page}}
 </style></head>
-<body><a class="skip" href="#content">Skip to guide</a><div class="layout"><aside class="sidebar" aria-label="Guide navigation"><div class="brand">MIDBRAIN / ENGINEERING</div><div class="edition">Operator guide · 10 September 2026</div><details class="toc" open><summary>On this page</summary><nav aria-label="Table of contents"><a href="#what-it-is">What it is</a><a href="#architecture">Architecture</a><a href="#one-run-step-by-step">One run, step by step</a><a href="#what-each-file-does">What each file does</a><a href="#what-a-run-leaves-behind">What a run leaves behind</a><a href="#local-setup">Local setup</a><a href="#choose-and-run-a-suite">Choose and run a suite</a><a href="#how-to-read-and-parse-results">How to read and parse results</a><a href="#export-and-verify-release-evidence">Export and verify release evidence</a><a href="#running-it-automatically">Running it automatically</a><a href="#what-is-validated-and-what-remains">What is validated and what remains</a><a href="#repository-references">Repository references</a></nav></details><div class="offline">One file. Works offline.<br>All styles, diagrams and controls are embedded.<br><button class="print" type="button">Print / Save PDF</button></div></aside><main class="main" id="content"><header class="hero"><div class="eyebrow">Architecture &amp; operations</div><h1>Multi-client testing,<br>from session to evidence.</h1><p class="deck">What we built, where it lives, why it works this way — and how to run it, investigate failures and review a release.</p><div class="tags"><span class="tag">5 real clients</span><span class="tag">Smoke / Simple / Required</span><span class="tag">Offline reference</span><span class="tag pending">Full required sign-off pending</span></div></header><article>
+<body><a class="skip" href="#content">Skip to guide</a><div class="layout"><aside class="sidebar" aria-label="Guide navigation"><div class="brand">MIDBRAIN / ENGINEERING</div><div class="edition">Operator guide · 10 September 2026</div><details class="toc" open><summary>On this page</summary><nav aria-label="Table of contents"><a href="#what-it-is">What it is</a><a href="#architecture">Architecture</a><a href="#one-run-step-by-step">One run, step by step</a><a href="#what-each-file-does">What each file does</a><a href="#where-to-find-and-edit-the-prompts">Where to find and edit the prompts</a><a href="#what-a-run-leaves-behind">What a run leaves behind</a><a href="#local-setup">Local setup</a><a href="#cost-and-duration-by-run-type">Cost and duration by run type</a><a href="#choose-and-run-a-suite">Choose and run a suite</a><a href="#commands-and-arguments">Commands and arguments</a><a href="#how-to-read-and-parse-results">How to read and parse results</a><a href="#export-and-verify-release-evidence">Export and verify release evidence</a><a href="#running-it-automatically">Running it automatically</a><a href="#what-is-validated-and-what-remains">What is validated and what remains</a><a href="#repository-references">Repository references</a></nav></details><div class="offline">One file. Works offline.<br>All styles, diagrams and controls are embedded.<br><button class="print" type="button">Print / Save PDF</button></div></aside><main class="main" id="content"><header class="hero"><div class="eyebrow">Architecture &amp; operations</div><h1>Multi-client testing,<br>from session to evidence.</h1><p class="deck">What we built, where it lives, why it works this way — and how to run it, investigate failures and review a release.</p><div class="tags"><span class="tag">5 real clients</span><span class="tag">Smoke / Simple / Required</span><span class="tag">Offline reference</span><span class="tag pending">Full required sign-off pending</span></div></header><article>
 <p>Companion to the <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design and coverage map</a>,
 <a class="repo-ref" href="#source-2" title="Repository reference: harness/README.md">CLI commands</a>, and <a class="repo-ref" href="#source-3" title="Repository reference: docs/testing/behavioral-ci.md">workflow setup</a>.
 Updated 2026-09-10 against branch <code>multi-client-harness-review</code>.</p>
 <p>Start with <a href="#architecture">architecture</a> to understand the system, <a href="#local-setup">local setup</a>
 to prepare a machine, <a href="#choose-and-run-a-suite">run recipes</a> to execute it, or
-<a href="#how-to-read-and-parse-results">reading results</a> to investigate an existing run.</p>
+<a href="#how-to-read-and-parse-results">reading results</a> to investigate an existing run.
+For changes to coverage, see <a href="#where-to-find-and-edit-the-prompts">prompt locations</a>.
+For command options, see the <a href="#commands-and-arguments">argument reference</a>.</p>
 <h2 id="what-it-is">What it is</h2>
 <p>The harness tests a release candidate of <code>midbrain-memory-mcp</code> against defined checks in five
 real AI clients: OpenCode, Claude Code, Codex, Hermes and NanoClaw. Behavioral runs use real
@@ -165,10 +167,14 @@ the same checks; it does not promise identical answers, tokens or latency on eve
 </tbody>
 </table></div>
 <p>Four product changes accompanied this testing work and require release review separately
-from the harness: synchronous Claude Stop plus migration (<code>f84c5f6</code>), recognized NanoClaw
-envelope decoding (<code>5b1f1fe</code>), managed memory-first/full-anchor rules (<code>477bd79</code>), and OpenCode
-capture draining during plugin disposal (<code>03b6271</code>). See the
-<a class="repo-ref" href="#source-17" title="Repository reference: docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes">release review boundaries</a> for details.</p>
+from the harness: synchronous Claude Stop plus migration (<code>e4e2fc2</code>), recognized NanoClaw
+envelope decoding (<code>5e9b9e4</code>), managed memory-first/full-anchor rules (<code>113016c</code>), and OpenCode
+capture draining during plugin disposal (<code>0dd4826</code>). See the
+<a class="repo-ref" href="#source-17" title="Repository reference: docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes">release review boundaries</a> for details.
+Commit titles were normalized on 2026-09-10. Earlier documents and run evidence retain the
+original SHAs (<code>f84c5f6</code>, <code>5b1f1fe</code>, <code>477bd79</code>, <code>03b6271</code> respectively); that history is
+preserved on <code>multi-client-harness-review-before-retitle</code>. Rewording a commit does not make
+an old report validate the new source SHA.</p>
 <h3 id="entry-point-and-libraries">Entry point and libraries</h3>
 <div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
 <thead>
@@ -407,8 +413,84 @@ opt-in real-CLI check without model calls; <code>harness-release-evidence.test.m
 and loading without source preparation.
 The <a class="repo-ref" href="#source-1" title="Repository reference: docs/testing/multi-client-harness.md">design</a> records coverage limits and manual-checklist gaps;
 <a class="repo-ref" href="#source-20" title="Repository reference: docs/testing/validation-2026-09-08.md">validation notes</a> preserve earlier run outcomes.</p>
+<h2 id="where-to-find-and-edit-the-prompts">Where to find and edit the prompts</h2>
+<p><strong>Prompt templates live in code, not in a separate prompt file or the client manifests.</strong>
+The scenario builds each prompt with the run marker and, where needed, fresh hidden values.
+The same shared scenario runs against each selected client's driver. NanoClaw lifecycle
+cases and the upgrade prelude have their own prompt definitions.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Prompt family</th>
+<th>Source to edit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1 capture</td>
+<td><a class="repo-ref" href="#source-21" title="Repository reference: harness/scenarios/s01-capture.mjs">harness/scenarios/s01-capture.mjs</a> — <code>prompt</code></td>
+</tr>
+<tr>
+<td>S2 cross-client writer and reader</td>
+<td><a class="repo-ref" href="#source-22" title="Repository reference: harness/scenarios/s02-cross-client-recall.mjs">harness/scenarios/s02-cross-client-recall.mjs</a> — <code>writePrompt</code> and <code>readPrompt</code></td>
+</tr>
+<tr>
+<td>S3 fresh-session checkpoint and recall</td>
+<td><a class="repo-ref" href="#source-23" title="Repository reference: harness/scenarios/s03-fresh-session-continuity.mjs">harness/scenarios/s03-fresh-session-continuity.mjs</a> — <code>p1</code> and <code>p2</code></td>
+</tr>
+<tr>
+<td>S4 project/global scope</td>
+<td><a class="repo-ref" href="#source-24" title="Repository reference: harness/scenarios/s04-project-global-isolation.mjs">harness/scenarios/s04-project-global-isolation.mjs</a></td>
+</tr>
+<tr>
+<td>S5 current vs stale value</td>
+<td><a class="repo-ref" href="#source-25" title="Repository reference: harness/scenarios/s05-freshness-reconciliation.mjs">harness/scenarios/s05-freshness-reconciliation.mjs</a></td>
+</tr>
+<tr>
+<td>S6 clean unrelated answer</td>
+<td><a class="repo-ref" href="#source-26" title="Repository reference: harness/scenarios/s06-no-match-clean.mjs">harness/scenarios/s06-no-match-clean.mjs</a></td>
+</tr>
+<tr>
+<td>S8 literal markers</td>
+<td><a class="repo-ref" href="#source-27" title="Repository reference: harness/scenarios/s08-marker-robustness.mjs">harness/scenarios/s08-marker-robustness.mjs</a></td>
+</tr>
+<tr>
+<td>S9 previous-release capture, new capture and recall</td>
+<td><a class="repo-ref" href="#source-28" title="Repository reference: harness/lib/upgrade.mjs">harness/lib/upgrade.mjs</a> — the S9 scenario file reports the prelude's results</td>
+</tr>
+<tr>
+<td>S10 native approval, consent, repair and plugin cases</td>
+<td><a class="repo-ref" href="#source-29" title="Repository reference: harness/scenarios/s10-client-specific.mjs">harness/scenarios/s10-client-specific.mjs</a></td>
+</tr>
+<tr>
+<td>NanoClaw cold wake, resume and legacy opener</td>
+<td><a class="repo-ref" href="#source-30" title="Repository reference: harness/scenarios/nanoclaw-lifecycle.mjs">harness/scenarios/nanoclaw-lifecycle.mjs</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>For example, S2's source templates are:</p>
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-1" type="button">Copy</button><pre aria-label="Code example" id="code-1" tabindex="0"><code class="language-js">const writePrompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it and acknowledge briefly.`;
+const readPrompt = `Search your MidBrain memory for task ${m} and tell me its exact verification value and which client recorded it. Do not guess; if it is not in memory say "not found after search".`;
+</code></pre></div>
+<p><code>${m}</code> is the retrieval anchor; <code>${value}</code> is generated for the writer. The reader must
+recover the value through MidBrain. Giving the value to the reader would invalidate the test.
+<code>--simple</code> selects fewer S2 pairs; it uses these same prompts and checks.</p>
+<p>To inspect <strong>what was actually sent</strong>, open the private run's
+<code>evidence/&lt;client&gt;/&lt;scenario&gt;/&lt;label&gt;.prompt.json</code>. The shared
+<a class="repo-ref" href="#source-31" title="Repository reference: harness/scenarios/_shared.mjs">runTurn helper</a> writes this before launching the client.
+For example, OpenCode writing for Claude in S2 produces
+<code>evidence/opencode/s02-cross-client-recall/write-for-claude.prompt.json</code>.
+The file includes <code>prompt</code>, <code>project</code> and session/resume options. A saved prompt alone does
+not prove execution completed; check its normalized turn and result cells too.</p>
+<p>These files record the harness's input, not the entire provider request. Client instructions,
+tool definitions, conversation history and NanoClaw transport wrappers can add context.
+Inspect native evidence when those additional inputs matter. S7 has no separate prompt:
+its compliance checks operate inside S2/S3/S5.</p>
+<p>When editing a prompt, review its expected outcome and deterministic checks together, keep
+hidden values out of reader prompts, then run the focused scenario. Keep the old evidence;
+a prompt change needs a new run. There is no CLI <code>--prompt</code> override.</p>
 <h2 id="what-a-run-leaves-behind">What a run leaves behind</h2>
-<pre aria-label="Code example" id="code-1" tabindex="0"><code>&lt;run-root&gt;/runs/&lt;run-id&gt;/
+<pre aria-label="Code example" id="code-2" tabindex="0"><code>&lt;run-root&gt;/runs/&lt;run-id&gt;/
   candidate.json, candidate/   frozen identity, tarball, extracted runtime, harness snapshot
   home/                        the throwaway home (contains credentials; never upload)
   logs/                        product hook and server logs at debug level
@@ -433,7 +515,7 @@ behavioral support; the programmatic CI OS matrix is separate.</p>
 global client installations. OpenCode and Hermes are installed by their adapters per run;
 Hermes includes its required MCP extra. Network access to package/image registries, upstream
 NanoClaw source, the model providers and the test API is needed.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-2" type="button">Copy</button><pre aria-label="Code example" id="code-2" tabindex="0"><code class="language-bash">npm ci
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-3" type="button">Copy</button><pre aria-label="Code example" id="code-3" tabindex="0"><code class="language-bash">npm ci
 export MIDBRAIN_HARNESS_ROOT="$HOME/.midbrain-harness"
 npm install --prefix "$MIDBRAIN_HARNESS_ROOT/clients" --no-audit --no-fund --no-save \
   @anthropic-ai/claude-code@2.1.258 @openai/codex@0.150.1
@@ -448,7 +530,7 @@ temporary installations. These pins match the checked-in behavioral workflow at 
 update date. Review changes to the pins together with the relevant adapters.</p>
 <h3 id="2-configure-dedicated-test-credentials-and-the-backend">2. Configure dedicated test credentials and the backend</h3>
 <p>Create the gitignored config only if it does not exist, then edit it locally:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-3" type="button">Copy</button><pre aria-label="Code example" id="code-3" tabindex="0"><code class="language-bash">if [ ! -e harness/.env ]; then
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-4" type="button">Copy</button><pre aria-label="Code example" id="code-4" tabindex="0"><code class="language-bash">if [ ! -e harness/.env ]; then
   (umask 077; cp harness/.env.example harness/.env)
 fi
 chmod 600 harness/.env
@@ -489,7 +571,7 @@ win. Do not paste secrets into commands or reports. Local Codex optionally suppo
 the private run home. The reproducible workflow path uses <code>apikey</code> instead.</p>
 <p>For the sibling local <code>memory</code> repository, these explicit setup operations start its Docker
 stack and create two test agents, writing their keys and API URL into <code>harness/.env</code>:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-4" type="button">Copy</button><pre aria-label="Code example" id="code-4" tabindex="0"><code class="language-bash">bash harness/scripts/local-stack.sh up
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-5" type="button">Copy</button><pre aria-label="Code example" id="code-5" tabindex="0"><code class="language-bash">bash harness/scripts/local-stack.sh up
 bash harness/scripts/local-stack.sh seed
 bash harness/scripts/local-stack.sh status
 </code></pre></div>
@@ -504,7 +586,7 @@ To make the NanoClaw runtime self-contained, run this separate preparation comma
 repository root. It needs Git, Docker and build-time network access, but no provider keys,
 MidBrain API or model calls. The destination's parent must exist; the destination itself
 must be new so an earlier package cannot be overwritten.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-5" type="button">Copy</button><pre aria-label="Code example" id="code-5" tabindex="0"><code class="language-bash">mkdir -p "$HOME/.midbrain-harness/packages"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-6" type="button">Copy</button><pre aria-label="Code example" id="code-6" tabindex="0"><code class="language-bash">mkdir -p "$HOME/.midbrain-harness/packages"
 node harness/scripts/prepare-nanoclaw.mjs "$HOME/.midbrain-harness/packages/nanoclaw"
 export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$HOME/.midbrain-harness/packages/nanoclaw/nanoclaw-image.json"
 </code></pre></div>
@@ -525,14 +607,14 @@ overrides. Unset it to restore the default path. Preparation itself uses <code>S
 when provided, allowing reuse of a clean pinned checkout and matching base image. The
 preparation command does not load <code>harness/.env</code>; export those optional overrides explicitly.</p>
 <p>For transfer to another machine, save the image alongside the manifest and license:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-6" type="button">Copy</button><pre aria-label="Code example" id="code-6" tabindex="0"><code class="language-bash">package_dir="$HOME/.midbrain-harness/packages/nanoclaw"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-7" type="button">Copy</button><pre aria-label="Code example" id="code-7" tabindex="0"><code class="language-bash">package_dir="$HOME/.midbrain-harness/packages/nanoclaw"
 image_id=$(node --input-type=module -e \
   'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync(process.argv[1])).imageId)' \
   "$package_dir/nanoclaw-image.json")
 docker image save -o "$package_dir/nanoclaw-image.tar" "$image_id"
 </code></pre></div>
 <p>Copy that directory to a machine with the same Docker image architecture, then:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-7" type="button">Copy</button><pre aria-label="Code example" id="code-7" tabindex="0"><code class="language-bash">package_dir="/absolute/path/to/copied-nanoclaw-package"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-8" type="button">Copy</button><pre aria-label="Code example" id="code-8" tabindex="0"><code class="language-bash">package_dir="/absolute/path/to/copied-nanoclaw-package"
 docker image load -i "$package_dir/nanoclaw-image.tar"
 export MIDBRAIN_HARNESS_NANOCLAW_MANIFEST="$package_dir/nanoclaw-image.json"
 node harness/run.mjs doctor --clients nanoclaw
@@ -555,7 +637,7 @@ packaged-run pass has been recorded yet. Existing behavioral results predate thi
 <h3 id="3-pin-models-and-check-readiness">3. Pin models and check readiness</h3>
 <p>This configuration matches the workflow's default model choices. Export it in the shell
 used for the run, or place these values in <code>harness/.env</code> without the <code>export</code> prefix:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-8" type="button">Copy</button><pre aria-label="Code example" id="code-8" tabindex="0"><code class="language-bash">export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-9" type="button">Copy</button><pre aria-label="Code example" id="code-9" tabindex="0"><code class="language-bash">export MIDBRAIN_HARNESS_CLAUDE_MODEL=claude-haiku-4-5
 export MIDBRAIN_HARNESS_OPENCODE_MODEL=anthropic/claude-haiku-4-5
 export MIDBRAIN_HARNESS_HERMES_PROVIDER=anthropic
 export MIDBRAIN_HARNESS_HERMES_MODEL=claude-haiku-4-5
@@ -575,6 +657,123 @@ Use <code>doctor --clients claude,codex</code> when intentionally preparing only
 can launch several fresh sessions, and a prompt can require several provider calls. A
 report cell is an assertion group, not a billable model call. The four Anthropic clients
 and API-authenticated Codex bill their respective providers; runner costs are separate.</p>
+<p>The workflow also offers <code>claude-sonnet-5</code> for the four Anthropic-backed clients. These are
+the model identifiers configured in the repository, not a claim that every account has
+access or that either model has produced a green required gate. Switching models changes
+the tested configuration and requires new evidence.</p>
+<h2 id="cost-and-duration-by-run-type">Cost and duration by run type</h2>
+<p>These are historical observations from local runs, not all-inclusive budgets. Wall-clock
+figures come from completed run metadata; spend is approximate, as recorded in the
+<a class="repo-ref" href="#source-32" title="Repository reference: docs/testing/review-2026-09-09.md#cost-and-model-choice">historical review</a>. Claude/OpenCode expose cost
+fields, NanoClaw estimates use transcript usage, and Hermes accounting is incomplete.
+Codex costs, runner charges and backend costs are excluded from the Anthropic figures.
+The historical Codex runs used a ChatGPT login; the workflow uses separately billed OpenAI API auth.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Run type</th>
+<th>Scope and models</th>
+<th>Observed duration</th>
+<th>Historical Anthropic spend</th>
+<th>Evidence / limitation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Programmatic</td>
+<td>Build, lint, tests, isolation; no models</td>
+<td>Varies by machine; recent local checks under 2 min</td>
+<td>$0 model usage</td>
+<td>Not a behavioral matrix; runner compute still has a cost.</td>
+</tr>
+<tr>
+<td>Smoke</td>
+<td>Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode</td>
+<td>About 2 min</td>
+<td>Under $0.15</td>
+<td><code>20260909-083217-0fbb</code>; eight prompts, excludes Codex, differs from five-client workflow smoke.</td>
+</tr>
+<tr>
+<td>Focused</td>
+<td>One/two clients and selected scenarios</td>
+<td>Depends on selection; one retained run took about 6 min</td>
+<td>Varies</td>
+<td><code>20260908-090053-5472</code>; a targeted run is not comparable to full coverage.</td>
+</tr>
+<tr>
+<td>Simple</td>
+<td>Five clients, all scenarios, upgrades, five S2 links</td>
+<td>Not yet measured in a completed run recorded here</td>
+<td>Not yet measured</td>
+<td>Saves 30 S2 prompts; no measured simple/full token-cost ratio.</td>
+</tr>
+<tr>
+<td>Full matrix</td>
+<td>Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs</td>
+<td>About 83 min</td>
+<td>About $2</td>
+<td><code>20260909-083452-4fdd</code>; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint.</td>
+</tr>
+<tr>
+<td>Required attempt</td>
+<td>Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5</td>
+<td>About 116 min</td>
+<td>About $10</td>
+<td><code>20260908-093157-c670</code>; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Fixed indexing/readback waits, container startup, tool output, model latency, context and
+native retries all affect the total. A prompt can trigger several provider calls, so neither
+prompt count nor the number of result cells is a reliable bill by itself.</p>
+<h3 id="model-prices-and-planning-estimates">Model prices and planning estimates</h3>
+<p>Anthropic's standard Claude API rates, checked 2026-09-10, are below in USD per million
+tokens. <a href="https://platform.claude.com/docs/en/about-claude/pricing">Official pricing</a>.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Uncached input</th>
+<th>5-minute cache write</th>
+<th>1-hour cache write</th>
+<th>Cache read</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Haiku 4.5</td>
+<td>$1</td>
+<td>$1.25</td>
+<td>$2</td>
+<td>$0.10</td>
+<td>$5</td>
+</tr>
+<tr>
+<td>Sonnet 5</td>
+<td>$2</td>
+<td>$2.50</td>
+<td>$4</td>
+<td>$0.20</td>
+<td>$10</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Illustrative estimate:</strong> holding token counts and cache categories constant, Sonnet 5 costs
+2× Haiku 4.5 at these rates. The historical approximately $2 Haiku broad run would therefore
+translate to approximately $4 for its Anthropic portion under that assumption. This is not
+an observed Sonnet result or a spending cap. Anthropic notes tokenizer differences in newer
+models; actual token counts, answers, tool calls and retries can change.
+<a href="https://platform.claude.com/docs/en/about-claude/pricing">Pricing and tokenizer notes</a>.</p>
+<p>For your own estimate, use <code>sum(tokens_in_category × category_rate / 1,000,000)</code> across clients,
+then add Codex API usage and runner/backend charges. Check account-specific pricing before
+budgeting. No completed simple-mode cost measurement is recorded here, so do not scale the
+whole bill by its 75% reduction in S2 pairs. The harness has no dollar-budget flag or automatic
+billing cutoff; timeouts limit duration, not spend.</p>
+<p>The workflow offers Haiku 4.5 and Sonnet 5 for the Anthropic clients. Neither a cheaper model
+nor a more capable model automatically establishes sign-off: record the selected models and
+obtain a passing required run. Marker, recall and format failures remain failures until
+triaged; they are not automatically waived as model noise.</p>
 <h2 id="choose-and-run-a-suite">Choose and run a suite</h2>
 <p>Start with a programmatic check, then smoke, then simple for broader iteration. Run required
 when collecting complete release evidence. The model-backed commands below incur provider
@@ -615,24 +814,27 @@ usage; <code>npm run check</code> does not run a paid behavioral matrix.</p>
 </tr>
 </tbody>
 </table></div>
+<p>“Light” means <strong>simple</strong> in this guide; there is no <code>--light</code> flag. Smoke is smaller again.
+“Full” means all ordered pairs; use <code>--required</code> with registry+upgrade when collecting
+release evidence. Omitting <code>--simple</code> alone does not mark the run as required.</p>
 <p>Run each command as a separate operation; these are alternatives, not a script that must
 execute all paid suites in sequence.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-9" type="button">Copy</button><pre aria-label="Code example" id="code-9" tabindex="0"><code class="language-bash"># Programmatic checks
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-10" type="button">Copy</button><pre aria-label="Code example" id="code-10" tabindex="0"><code class="language-bash"># Programmatic checks
 VITEST_MAX_WORKERS=4 npm run check
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-10" type="button">Copy</button><pre aria-label="Code example" id="code-10" tabindex="0"><code class="language-bash"># Smoke: all five clients, two scenarios
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-11" type="button">Copy</button><pre aria-label="Code example" id="code-11" tabindex="0"><code class="language-bash"># Smoke: all five clients, two scenarios
 node harness/run.mjs run --mode registry --scenarios s01,s06
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-11" type="button">Copy</button><pre aria-label="Code example" id="code-11" tabindex="0"><code class="language-bash"># Simple: all scenarios, reduced cross-client pairing
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-12" type="button">Copy</button><pre aria-label="Code example" id="code-12" tabindex="0"><code class="language-bash"># Simple: all scenarios, reduced cross-client pairing
 node harness/run.mjs run --mode registry --upgrade --simple --approve-codex-hooks
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-12" type="button">Copy</button><pre aria-label="Code example" id="code-12" tabindex="0"><code class="language-bash"># Required: full selection, including upgrades and native Codex approval
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-13" type="button">Copy</button><pre aria-label="Code example" id="code-13" tabindex="0"><code class="language-bash"># Required: full selection, including upgrades and native Codex approval
 node harness/run.mjs run --mode registry --upgrade --required --approve-codex-hooks
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-13" type="button">Copy</button><pre aria-label="Code example" id="code-13" tabindex="0"><code class="language-bash"># Focused: one cross-client comparison in both directions
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-14" type="button">Copy</button><pre aria-label="Code example" id="code-14" tabindex="0"><code class="language-bash"># Focused: one cross-client comparison in both directions
 node harness/run.mjs run --mode registry --clients codex,nanoclaw --scenarios s02
 </code></pre></div>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-14" type="button">Copy</button><pre aria-label="Code example" id="code-14" tabindex="0"><code class="language-bash"># Focused: previous-release upgrade continuity for Claude
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-15" type="button">Copy</button><pre aria-label="Code example" id="code-15" tabindex="0"><code class="language-bash"># Focused: previous-release upgrade continuity for Claude
 node harness/run.mjs run --mode registry --upgrade --clients claude --scenarios s09
 </code></pre></div>
 <p>The default <code>dev</code> mode runs the extracted candidate directly. Registry mode exercises npm
@@ -659,6 +861,121 @@ approval instead. Without either option, that S10 case remains blocked.</p>
 to a 300-second timeout. These are waiting bounds, not automatic reruns of failed scenarios.
 Tune through the documented env template/CLI flags only when investigating measured delays.
 Record the changed configuration and keep the original failed run.</p>
+<h2 id="commands-and-arguments">Commands and arguments</h2>
+<p>Run <code>node harness/run.mjs help</code> for the CLI's own summary. The following describes the
+current implementation; boolean switches are supplied without a value (omit a switch to
+disable it, rather than writing <code>--simple=false</code>).</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose and accepted inputs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>doctor</code></td>
+<td>Readiness checks; optional <code>--clients</code> and <code>--root</code>. No paid model calls.</td>
+</tr>
+<tr>
+<td><code>freeze</code></td>
+<td>Build/package/extract the candidate and print its identity; optional <code>--mode</code>, default <code>dev</code>. Does not start a registry or run scenarios.</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>Execute selected clients/scenarios, using the flags below.</td>
+</tr>
+<tr>
+<td><code>report &lt;runDir&gt;</code></td>
+<td>Regenerate <code>report.md</code> from completed <code>results.json</code>; no model calls.</td>
+</tr>
+<tr>
+<td><code>help</code></td>
+<td>Show command usage, client IDs and scenario IDs.</td>
+</tr>
+</tbody>
+</table></div>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Run flag</th>
+<th>Default</th>
+<th>Meaning / constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--clients opencode,claude,codex,hermes,nanoclaw</code></td>
+<td>All five</td>
+<td>Select clients by ID; manifest order controls execution and simple-cycle order. Forbidden with <code>--required</code>.</td>
+</tr>
+<tr>
+<td><code>--scenarios s01,s06</code></td>
+<td>All implemented scenarios</td>
+<td>Comma-separated short IDs or full scenario IDs. No S7 driver. Forbidden with <code>--required</code>.</td>
+</tr>
+<tr>
+<td><code>--mode dev</code> or <code>--mode registry</code></td>
+<td><code>dev</code></td>
+<td>Direct extracted candidate or loopback npm installation.</td>
+</tr>
+<tr>
+<td><code>--upgrade</code></td>
+<td>Off</td>
+<td>Previous-release upgrade prelude; requires registry mode.</td>
+</tr>
+<tr>
+<td><code>--simple</code></td>
+<td>Off</td>
+<td>One directed S2 cycle; other selected checks unchanged. Incompatible with <code>--required</code>.</td>
+</tr>
+<tr>
+<td><code>--required</code></td>
+<td>Off</td>
+<td>Full client/scenario selection and all ordered pairs; requires registry+upgrade, forbids filters and simple mode.</td>
+</tr>
+<tr>
+<td><code>--approve-codex-hooks</code></td>
+<td>Off</td>
+<td>Native Codex approval automation for S10; pinned client and Python 3 required.</td>
+</tr>
+<tr>
+<td><code>--interactive</code></td>
+<td>Off</td>
+<td>Manual terminal alternative for S10 approval. Choose one approval mode.</td>
+</tr>
+<tr>
+<td><code>--root /absolute/path</code></td>
+<td><code>MIDBRAIN_HARNESS_ROOT</code>, otherwise <code>~/.midbrain-harness</code></td>
+<td>Parent of <code>runs/&lt;run-id&gt;</code>; must be outside temporary directories.</td>
+</tr>
+<tr>
+<td><code>--readback-timeout-ms 90000</code></td>
+<td>Env override, otherwise <code>90000</code></td>
+<td>Maximum capture readback wait; env: <code>MIDBRAIN_HARNESS_READBACK_TIMEOUT_MS</code>.</td>
+</tr>
+<tr>
+<td><code>--index-grace-ms 20000</code></td>
+<td>Env override, otherwise <code>20000</code></td>
+<td>Indexing delay before recall where used; env: <code>MIDBRAIN_HARNESS_INDEX_GRACE_MS</code>.</td>
+</tr>
+<tr>
+<td><code>--poll-interval-ms 5000</code></td>
+<td><code>5000</code></td>
+<td>Readback polling interval; supported in code though omitted from the compact CLI help.</td>
+</tr>
+<tr>
+<td><code>--keep</code></td>
+<td>Off; no behavioral effect</td>
+<td>Currently parsed but not used. Local run directories are retained regardless; containers/registry still undergo normal cleanup.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Client turn timeout is an environment setting, <code>MIDBRAIN_HARNESS_TURN_TIMEOUT_MS</code>, not a
+<code>--turn-timeout-ms</code> flag. Export it in the shell before launching the CLI: some adapters read
+it during module import, before <code>.env</code> loads. Model pins and the NanoClaw package manifest
+are also environment settings, as documented above. The CLI currently does not reject every
+unknown option; use the supported names rather than assuming an extra flag took effect.</p>
 <h2 id="how-to-read-and-parse-results">How to read and parse results</h2>
 <h3 id="start-with-the-verdict-and-identity">Start with the verdict and identity</h3>
 <p>The run prints the path to <code>report.md</code>. Open it, then check:</p>
@@ -710,7 +1027,7 @@ cells exit 1; handled interruptions have signal exit codes. A focused/simple run
 without satisfying release coverage. Preserve the command's failure status in scripts; do
 not turn failures into success with <code>|| true</code> or an unchecked pipe to <code>tail</code>.</p>
 <p>To preserve the result while still printing a useful message in a Bash script:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-15" type="button">Copy</button><pre aria-label="Code example" id="code-15" tabindex="0"><code class="language-bash">if node harness/run.mjs run --mode registry --scenarios s01,s06; then
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-16" type="button">Copy</button><pre aria-label="Code example" id="code-16" tabindex="0"><code class="language-bash">if node harness/run.mjs run --mode registry --scenarios s01,s06; then
   run_status=0
 else
   run_status=$?
@@ -724,7 +1041,7 @@ exit "$run_status"
 completed private run or exported bundle and needs no extra JSON utility. It prints identity,
 counts, failed check names and evidence paths, rather than dumping credentials or transcripts.
 It is a diagnostic summary, not a replacement for the release verifier.</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-16" type="button">Copy</button><pre aria-label="Code example" id="code-16" tabindex="0"><code class="language-bash">run_dir="/absolute/path/to/completed-run"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-17" type="button">Copy</button><pre aria-label="Code example" id="code-17" tabindex="0"><code class="language-bash">run_dir="/absolute/path/to/completed-run"
 node --input-type=module - "$run_dir/results.json" &lt;&lt;'JS'
 import { readFileSync } from 'node:fs';
 const r = JSON.parse(readFileSync(process.argv[2], 'utf8'));
@@ -757,7 +1074,7 @@ for (const c of r.cells.filter(c =&gt; c.status !== 'PASS')) {
 JS
 </code></pre></div>
 <p>Rebuild a local report from its existing JSON without rerunning clients:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-17" type="button">Copy</button><pre aria-label="Code example" id="code-17" tabindex="0"><code class="language-bash">node harness/run.mjs report "$run_dir"
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-18" type="button">Copy</button><pre aria-label="Code example" id="code-18" tabindex="0"><code class="language-bash">node harness/run.mjs report "$run_dir"
 </code></pre></div>
 <p>This rewrites <code>report.md</code> only. Do not edit files inside a checksummed release bundle;
 regenerate a new export from the original run instead.</p>
@@ -807,7 +1124,7 @@ After fixing the cause, run a focused scenario, retain both run IDs, and finally
 required matrix on the intended candidate. A focused fix does not rewrite an old failed gate.</p>
 <h2 id="export-and-verify-release-evidence">Export and verify release evidence</h2>
 <p>Export only completed runs into a new directory outside the private run directory:</p>
-<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-18" type="button">Copy</button><pre aria-label="Code example" id="code-18" tabindex="0"><code class="language-bash">node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
+<div class="code-block"><button aria-label="Copy code example" class="copy" data-copy="code-19" type="button">Copy</button><pre aria-label="Code example" id="code-19" tabindex="0"><code class="language-bash">node harness/scripts/release-evidence.mjs export "$run_dir" /absolute/path/to/new-bundle
 node harness/scripts/release-evidence.mjs verify \
   /absolute/path/to/new-bundle /absolute/path/to/exact-tested-release.tgz FULL_SOURCE_SHA
 </code></pre></div>
@@ -827,9 +1144,9 @@ It reuses the results rather than asking another model to judge them.</p>
 <p>An RC-version rewrite changes archive bytes. A later repack with another version cannot
 inherit this hash match, even when source code looks equivalent. Checksums detect mismatches;
 they are not authorship signatures. Verification complements programmatic CI and Radu's
-review under the <a class="repo-ref" href="#source-21" title="Repository reference: docs/releases/README.md#release-validation-checklist">release checklist</a>.</p>
+review under the <a class="repo-ref" href="#source-33" title="Repository reference: docs/releases/README.md#release-validation-checklist">release checklist</a>.</p>
 <h2 id="running-it-automatically">Running it automatically</h2>
-<p>The manual <a class="repo-ref" href="#source-22" title="Repository reference: .github/workflows/behavioral.yml">behavioral workflow</a> is built, but has
+<p>The manual <a class="repo-ref" href="#source-34" title="Repository reference: .github/workflows/behavioral.yml">behavioral workflow</a> is built, but has
 not been deployed or validated on a cloud runner. Use <a class="repo-ref" href="#source-3" title="Repository reference: docs/testing/behavioral-ci.md">workflow setup</a>
 for runner prerequisites, exact pins, environment settings and the deployment sequence.
 The YAML file is the source of truth; there is no second workflow example in this guide.</p>
@@ -869,14 +1186,14 @@ No PR/release comments or Slack messages are sent by the current workflow.</p>
 <tr>
 <th>Area</th>
 <th>Implemented</th>
-<th>Recorded validation as of 2026-09-09</th>
+<th>Recorded validation as of 2026-09-10</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Programmatic suite and harness logic</td>
-<td>Product tests, scoring/driver checks, isolation, evidence and simple-mode tests</td>
-<td>After simple mode: 1,332 tests passed, 3 skipped, plus 224 copied-topology isolation checks.</td>
+<td>Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests</td>
+<td>Latest local full check: 1,337 tests passed, 3 skipped, plus 224 copied-topology isolation checks.</td>
 </tr>
 <tr>
 <td>Native Codex hook approval</td>
@@ -894,6 +1211,11 @@ No PR/release comments or Slack messages are sent by the current workflow.</p>
 <td>Unit-tested; no recorded live simple matrix yet.</td>
 </tr>
 <tr>
+<td>Self-contained NanoClaw runtime</td>
+<td>Local image preparation, embedded runner/assets/license, manifest and hash verification</td>
+<td>Unit-tested; the local build attempt was blocked by an unreachable Docker daemon. No prepared-image behavioral run is validated.</td>
+</tr>
+<tr>
 <td>Release evidence</td>
 <td>Selected redacted export and strict candidate verification</td>
 <td>Export/verifier tests; no complete green required evidence for the intended current candidate.</td>
@@ -909,7 +1231,7 @@ No PR/release comments or Slack messages are sent by the current workflow.</p>
 and obtain a complete passing required report on the intended candidate plus programmatic
 CI and Radu's review. Exact equivalence with the maintainer's separate manual checklist
 remains unconfirmed. Cloud activation, Slack alerts, broader OS/client behavioral coverage,
-automatic update discovery and real-npm post-publish smoke remain outside current proof.</p><section class="references" id="repository-references"><h2>Repository references</h2><p>These paths identify supporting source files in <code>midbrain-memory-mcp</code>. They are references, not required assets: this HTML file works without the repository or a network connection.</p><dl><div id="source-1"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md</code></dd></div><div id="source-2"><dt>Repository source</dt><dd><code>harness/README.md</code></dd></div><div id="source-3"><dt>Repository source</dt><dd><code>docs/testing/behavioral-ci.md</code></dd></div><div id="source-4"><dt>Repository source</dt><dd><code>.github/workflows/ci.yml</code></dd></div><div id="source-5"><dt>Repository source</dt><dd><code>index.js</code></dd></div><div id="source-6"><dt>Repository source</dt><dd><code>mcp.mjs</code></dd></div><div id="source-7"><dt>Repository source</dt><dd><code>install.mjs</code></dd></div><div id="source-8"><dt>Repository source</dt><dd><code>shared/clients</code></dd></div><div id="source-9"><dt>Repository source</dt><dd><code>shared/midbrain-api.mjs</code></dd></div><div id="source-10"><dt>Repository source</dt><dd><code>shared/agent-rules.mjs</code></dd></div><div id="source-11"><dt>Repository source</dt><dd><code>plugins/claude-code</code></dd></div><div id="source-12"><dt>Repository source</dt><dd><code>plugins/codex</code></dd></div><div id="source-13"><dt>Repository source</dt><dd><code>plugins/hermes</code></dd></div><div id="source-14"><dt>Repository source</dt><dd><code>plugins/opencode/midbrain-memory.ts</code></dd></div><div id="source-15"><dt>Repository source</dt><dd><code>dist/midbrain-shared.mjs</code></dd></div><div id="source-16"><dt>Repository source</dt><dd><code>skills/nanoclaw</code></dd></div><div id="source-17"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes</code></dd></div><div id="source-18"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership</code></dd></div><div id="source-19"><dt>Repository source</dt><dd><code>harness/.env.example</code></dd></div><div id="source-20"><dt>Repository source</dt><dd><code>docs/testing/validation-2026-09-08.md</code></dd></div><div id="source-21"><dt>Repository source</dt><dd><code>docs/releases/README.md#release-validation-checklist</code></dd></div><div id="source-22"><dt>Repository source</dt><dd><code>.github/workflows/behavioral.yml</code></dd></div></dl></section></article><footer class="footer">MidBrain Memory MCP · Documentation snapshot, 2026-09-10.<br>Source: <code>docs/testing/harness-how-it-works.md</code>. This page is a guide, not live run evidence.</footer></main></div><div class="copy-status" role="status" aria-live="polite"></div><script>
+automatic update discovery and real-npm post-publish smoke remain outside current proof.</p><section class="references" id="repository-references"><h2>Repository references</h2><p>These paths identify supporting source files in <code>midbrain-memory-mcp</code>. They are references, not required assets: this HTML file works without the repository or a network connection.</p><dl><div id="source-1"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md</code></dd></div><div id="source-2"><dt>Repository source</dt><dd><code>harness/README.md</code></dd></div><div id="source-3"><dt>Repository source</dt><dd><code>docs/testing/behavioral-ci.md</code></dd></div><div id="source-4"><dt>Repository source</dt><dd><code>.github/workflows/ci.yml</code></dd></div><div id="source-5"><dt>Repository source</dt><dd><code>index.js</code></dd></div><div id="source-6"><dt>Repository source</dt><dd><code>mcp.mjs</code></dd></div><div id="source-7"><dt>Repository source</dt><dd><code>install.mjs</code></dd></div><div id="source-8"><dt>Repository source</dt><dd><code>shared/clients</code></dd></div><div id="source-9"><dt>Repository source</dt><dd><code>shared/midbrain-api.mjs</code></dd></div><div id="source-10"><dt>Repository source</dt><dd><code>shared/agent-rules.mjs</code></dd></div><div id="source-11"><dt>Repository source</dt><dd><code>plugins/claude-code</code></dd></div><div id="source-12"><dt>Repository source</dt><dd><code>plugins/codex</code></dd></div><div id="source-13"><dt>Repository source</dt><dd><code>plugins/hermes</code></dd></div><div id="source-14"><dt>Repository source</dt><dd><code>plugins/opencode/midbrain-memory.ts</code></dd></div><div id="source-15"><dt>Repository source</dt><dd><code>dist/midbrain-shared.mjs</code></dd></div><div id="source-16"><dt>Repository source</dt><dd><code>skills/nanoclaw</code></dd></div><div id="source-17"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#release-review-for-the-hardening-changes</code></dd></div><div id="source-18"><dt>Repository source</dt><dd><code>docs/testing/multi-client-harness.md#5-behavioral-coverage-and-prompt-ownership</code></dd></div><div id="source-19"><dt>Repository source</dt><dd><code>harness/.env.example</code></dd></div><div id="source-20"><dt>Repository source</dt><dd><code>docs/testing/validation-2026-09-08.md</code></dd></div><div id="source-21"><dt>Repository source</dt><dd><code>harness/scenarios/s01-capture.mjs</code></dd></div><div id="source-22"><dt>Repository source</dt><dd><code>harness/scenarios/s02-cross-client-recall.mjs</code></dd></div><div id="source-23"><dt>Repository source</dt><dd><code>harness/scenarios/s03-fresh-session-continuity.mjs</code></dd></div><div id="source-24"><dt>Repository source</dt><dd><code>harness/scenarios/s04-project-global-isolation.mjs</code></dd></div><div id="source-25"><dt>Repository source</dt><dd><code>harness/scenarios/s05-freshness-reconciliation.mjs</code></dd></div><div id="source-26"><dt>Repository source</dt><dd><code>harness/scenarios/s06-no-match-clean.mjs</code></dd></div><div id="source-27"><dt>Repository source</dt><dd><code>harness/scenarios/s08-marker-robustness.mjs</code></dd></div><div id="source-28"><dt>Repository source</dt><dd><code>harness/lib/upgrade.mjs</code></dd></div><div id="source-29"><dt>Repository source</dt><dd><code>harness/scenarios/s10-client-specific.mjs</code></dd></div><div id="source-30"><dt>Repository source</dt><dd><code>harness/scenarios/nanoclaw-lifecycle.mjs</code></dd></div><div id="source-31"><dt>Repository source</dt><dd><code>harness/scenarios/_shared.mjs</code></dd></div><div id="source-32"><dt>Repository source</dt><dd><code>docs/testing/review-2026-09-09.md#cost-and-model-choice</code></dd></div><div id="source-33"><dt>Repository source</dt><dd><code>docs/releases/README.md#release-validation-checklist</code></dd></div><div id="source-34"><dt>Repository source</dt><dd><code>.github/workflows/behavioral.yml</code></dd></div></dl></section></article><footer class="footer">MidBrain Memory MCP · Documentation snapshot, 2026-09-10.<br>Source: <code>docs/testing/harness-how-it-works.md</code>. This page is a guide, not live run evidence.</footer></main></div><div class="copy-status" role="status" aria-live="polite"></div><script>
 const notice=document.querySelector('.copy-status');
 function announce(message){notice.textContent=message;notice.classList.add('visible');setTimeout(()=>notice.classList.remove('visible'),2200)}
 async function copyCode(button){const value=document.getElementById(button.dataset.copy).textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(value)}else{const area=document.createElement('textarea');area.value=value;area.style.cssText='position:fixed;left:-9999px;top:0';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();button.focus();if(!ok)throw Error('Clipboard unavailable')}button.textContent='Copied';announce('Code copied');setTimeout(()=>button.textContent='Copy',1800)}catch{announce('Select the code and copy it manually.')}}
