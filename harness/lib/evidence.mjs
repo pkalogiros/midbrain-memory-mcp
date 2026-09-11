@@ -1,14 +1,14 @@
 // Evidence collectors: file trees, log tails, cache/spool counts, config shape.
-import { existsSync, readdirSync, statSync, copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, lstatSync, statSync, copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 export function walk(dir, pred, out = []) {
-  if (!existsSync(dir)) return out;
+  if (!existsSync(dir) || lstatSync(dir).isSymbolicLink()) return out;
   for (const ent of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, ent.name);
     if (ent.isDirectory()) walk(p, pred, out);
-    else if (!pred || pred(p)) out.push(p);
+    else if (ent.isFile() && (!pred || pred(p))) out.push(p);
   }
   return out;
 }

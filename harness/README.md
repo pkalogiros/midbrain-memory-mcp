@@ -335,6 +335,11 @@ seeding you still add `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` for the clients t
 
 ## Safety
 
+- The private home isolates configuration; it is **not an OS sandbox**. Native clients can
+  run commands with your user permissions. Use trusted prompts and test memories, or a
+  dedicated machine for untrusted inputs.
+- Local reports and traces may contain prompt text, model answers and tool output. Use
+  the evidence exporter and review its output before sharing; do not upload a whole run directory.
 - Children never see your real `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `MIDBRAIN_*`,
   `ANTHROPIC_*`, `OPENAI_*` or `CI`; the harness builds a scrubbed env and adds only the
   secret each client needs.

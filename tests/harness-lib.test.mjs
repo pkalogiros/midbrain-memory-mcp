@@ -7,6 +7,7 @@ import fs from 'fs';
 import { complianceChecks, forbiddenHits, statusFromChecks, check, isMidbrainTool } from '../harness/lib/checks.mjs';
 import { hashSurface, diff, extraSurfaces } from '../harness/lib/tripwire.mjs';
 import { buildMatrix, worst, renderMarkdown, ROWS } from '../harness/lib/report.mjs';
+import { copyTree } from '../harness/lib/evidence.mjs';
 import { childEnv } from '../harness/lib/context.mjs';
 import { loadDotEnv } from '../harness/lib/env.mjs';
 
@@ -180,4 +181,22 @@ describe('harness .env loader', () => {
       delete process.env.HARNESS_T_A; delete process.env.HARNESS_T_B; delete process.env.HARNESS_T_C;
     }
   });
+});
+
+
+it('collects regular evidence without following file, directory or root symlinks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-evidence-links-'));
+  try {
+    const source = path.join(root, 'sessions');
+    fs.mkdirSync(source);
+    fs.mkdirSync(path.join(root, 'outside'));
+    fs.writeFileSync(path.join(root, 'outside', 'private.json'), 'synthetic private fixture');
+    fs.writeFileSync(path.join(source, 'turn.json'), '{}');
+    fs.symlinkSync(path.join(root, 'outside', 'private.json'), path.join(source, 'linked.json'));
+    fs.symlinkSync(path.join(root, 'outside'), path.join(source, 'linked-dir'), 'dir');
+    fs.symlinkSync(source, path.join(root, 'linked-root'), 'dir');
+    expect(copyTree(source, path.join(root, 'collected'))).toBe(1);
+    expect(fs.readdirSync(path.join(root, 'collected'))).toEqual(['turn.json']);
+    expect(copyTree(path.join(root, 'linked-root'), path.join(root, 'other'))).toBe(0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
