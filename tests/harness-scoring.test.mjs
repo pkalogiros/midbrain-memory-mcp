@@ -323,6 +323,8 @@ it('counts only a proven read of a preceding MidBrain result file', async () => 
   const source = { name: 'midbrain__memory_search', ok: true, result: 'Output has been saved to /tmp/tool-results/result.txt.\nFormat: Plain text' };
   const read = { name: 'Bash', ok: true, input: { command: 'grep -n "TASK" /tmp/tool-results/result.txt' }, result: 'VALUE-secret' };
   expect(memoryEvidence({ toolCalls: [source, read] })).toContain('VALUE-secret');
+  expect(memoryEvidence({ toolCalls: [source, { ...read, input: { command: 'grep -n "TASK" "/tmp/tool-results/result.txt"' } }] })).toContain('VALUE-secret');
+  expect(memoryEvidence({ toolCalls: [source, { ...read, input: { command: 'grep -n "TASK" "/tmp/tool-results/result.txt"; echo VALUE-secret' } }] })).not.toContain('VALUE-secret');
   expect(memoryEvidence({ toolCalls: [read, source] })).not.toContain('VALUE-secret');
   expect(memoryEvidence({ toolCalls: [source, { ...read, input: { command: 'grep -n "TASK" /tmp/other.txt' } }] })).not.toContain('VALUE-secret');
 });

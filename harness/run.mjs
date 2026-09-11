@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { profileOptions } from './lib/profiles.mjs';
+import { addFailureTraces } from './lib/failure-traces.mjs';
+import { loadExperiment, SIMPLE_SCENARIOS } from './lib/experiment.mjs';
 // MidBrain multi-client behavioral harness — CLI.
 //   node harness/run.mjs doctor
 //   node harness/run.mjs freeze
@@ -156,6 +159,19 @@ async function runScenario(sc, args, cells, creditClient) {
 }
 
 async function run(flags) {
+  loadDotEnv(path.join(HARNESS_DIR, '.env'));
+  const experimentFile = flags.config || process.env.MIDBRAIN_HARNESS_CONFIG;
+  const experiment = experimentFile ? loadExperiment(path.resolve(experimentFile), Object.keys(MANIFESTS)) : null;
+  if (experiment && (flags.high || flags.xhigh)) throw new Error('Custom experiment config is for --simple.');
+  flags = profileOptions(flags);
+  if (experiment) {
+    if (flags['model-checks'] || flags['follow-up']) throw new Error('Custom experiments use --simple, not the fixed model-check profile.');
+    flags = { ...flags, simple: true, clients: flags.clients || experiment.clients.join(',') };
+    for (const [id, model] of Object.entries(experiment.models || {})) process.env[`MIDBRAIN_HARNESS_${id.toUpperCase()}_MODEL`] ||= model;
+  }
+  const quickSimple = Boolean(flags.simple && !flags.high && !flags['model-checks'] && !flags['follow-up']);
+  if (quickSimple && flags.required) throw new Error('--simple cannot be combined with --required');
+  if (quickSimple && (flags.upgrade || flags.required || flags.scenarios)) throw new Error('Simple uses capture, fresh-session recall and an unrelated question. Use --config to customize it; omit --simple for upgrade/full scenarios.');
   flags = modelCheckOptions(flags);
   const baseline = flags['follow-up'] === undefined ? null : loadBaseline(flags['follow-up']);
   if (baseline) {
@@ -185,6 +201,8 @@ async function run(flags) {
       keep: Boolean(flags.keep),
       required: Boolean(flags.required),
       simple: Boolean(flags.simple),
+      quickSimple, experiment,
+      profile: quickSimple ? 'simple' : flags.high ? 'high' : flags.xhigh ? 'xhigh' : null,
       concurrency,
       interactive: Boolean(flags.interactive),
       upgrade,
@@ -220,7 +238,7 @@ async function run(flags) {
   const candidate = await freezeCandidate({ mode, directory: path.join(ctx.dirs.run, 'candidate') });
   ctx.candidate = candidate;
   const manifests = selectManifests(list(flags.clients));
-  const scenarios = selectScenarios(ctx.options.modelChecks ? followupScenarios() : list(flags.scenarios));
+  const scenarios = quickSimple ? (experiment?.scenarios || Object.keys(SIMPLE_SCENARIOS)).map(name => selectScenarios([SIMPLE_SCENARIOS[name]])[0]).sort((a,b) => ['s01','s03','s06'].indexOf(a.id.slice(0,3)) - ['s01','s03','s06'].indexOf(b.id.slice(0,3))) : selectScenarios(ctx.options.modelChecks ? followupScenarios() : list(flags.scenarios));
   let followup = null;
   if (baseline) {
     const reusedChecks = validateBaseline(baseline.results, candidate, manifests, { apiBase: apiBaseUrl(), pk: process.env.MIDBRAIN_HARNESS_PK === '1' });
@@ -397,6 +415,8 @@ async function run(flags) {
     run: {
       required: ctx.options.required,
       simple: ctx.options.simple,
+      quickSimple, experiment,
+      profile: quickSimple ? 'simple' : flags.high ? 'high' : flags.xhigh ? 'xhigh' : null,
       concurrency,
       crossClientPairs,
       followup,
@@ -421,6 +441,7 @@ async function run(flags) {
   ctx.writeJson(path.join(ctx.dirs.run, 'costs.json'), results.run.costs);
   writeFileSync(path.join(ctx.dirs.run, 'report.md'), renderMarkdown(withFailureContext(results)));
   writeFileSync(path.join(ctx.dirs.run, 'report.html'), renderRunHtml(withFailureContext(results)));
+  addFailureTraces(ctx.dirs.run);
   if (existsSync(path.join(ctx.dirs.run, 'results.partial.json'))) rmSync(path.join(ctx.dirs.run, 'results.partial.json'));
 
   const counts = {};
@@ -460,7 +481,7 @@ function help() {
 commands
   doctor   [--clients a,b]          readiness of this machine (clients, secrets, API, run root)
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
-  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --required] [--keep]
+  run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --high | --xhigh] [--required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR] [--concurrency N]
            [--interactive]
   report   <runDir|sweepDir>        re-render Markdown/HTML results without model calls
@@ -472,8 +493,11 @@ commands
                  Candidate, harness, client versions, API and capture settings must match.
 --model-checks: six-prompt model profile; infrastructure unverified, no baseline required.
 
---simple: cross-client recall uses one directed cycle; other scenarios are unchanged.
-          Without --simple, all ordered pairs run. Cannot combine with --required.
+--simple: three prompts per client: capture, fresh-session recall, unrelated question.
+          Customize with --config FILE or MIDBRAIN_HARNESS_CONFIG. No upgrade/full cases.
+--high: previous broad Simple: all scenarios + upgrades, one cross-client cycle.
+--xhigh: full matrix + upgrades, all ordered cross-client pairs.
+         Add --required for strict release evidence. High/XHigh use registry mode.
 --concurrency: 1–5 concurrent client jobs (default 1; try 3). Each client stays ordered.
                Cold capture, upgrade and client-specific scenarios remain serial.
                Sweeps accept a total budget of 1–10, capped at 5 per round.

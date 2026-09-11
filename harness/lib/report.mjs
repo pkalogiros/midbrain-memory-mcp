@@ -54,7 +54,7 @@ export function renderMarkdown(results) {
   lines.push(`Result: **${run.finishedAt ? runOutcome(cells, isolation.ok) : 'INCOMPLETE'}**. BLOCKED means incomplete coverage and does not itself fail the run.`, '');
   lines.push('| Field | Value |');
   lines.push('|---|---|');
-  lines.push(`| Run type | ${run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
+  lines.push(`| Run type | ${run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.profile === 'high' ? 'High — broad coverage with one cross-client cycle' : run.profile === 'xhigh' ? 'XHigh — full matrix' : run.quickSimple ? 'Simple — three prompts per client' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
   if (run.followup) {
     lines.push(`| Verified baseline | ${esc(run.followup.baselineRunId)}; results SHA-256 ${esc(run.followup.reportSha256)} |`);
     lines.push('| Prior evidence | Project isolation, upgrade and client-specific checks were verified in the baseline, not rerun or counted as new passes. |');

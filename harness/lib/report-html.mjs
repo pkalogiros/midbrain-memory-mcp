@@ -55,7 +55,7 @@ function page(title, verdict, scope, body) {
 export function renderRunHtml({ run, candidate, clients, cells, isolation }) {
   const failed = cells.filter(c => c.status !== 'PASS');
   const outcome = run.finishedAt ? runOutcome(cells, isolation?.ok === true) : 'INCOMPLETE';
-  const scope = run.followup ? `Model checks with prior infrastructure evidence from baseline ${run.followup.baselineRunId}. Those checks were not rerun; this is not full required coverage.` : run.modelChecks ? 'Infrastructure unverified. Six-prompt model checks only; upgrade, project isolation and client-specific cases were omitted.' : run.required ? 'Required matrix execution. A passing report still requires the separate release evidence verification.' : 'Reduced or focused coverage. This report is not full required release sign-off.';
+  const scope = run.profile === 'high' ? 'High: all scenarios and upgrades, with one cross-client cycle. Not the required release gate.' : run.profile === 'xhigh' ? 'XHigh: full matrix and upgrades. Release approval still requires passing the required evidence gate.' : run.quickSimple ? 'Simple: capture, fresh-session recall and an unrelated question; three prompts per client by default.' : run.followup ? `Model checks with prior infrastructure evidence from baseline ${run.followup.baselineRunId}. Those checks were not rerun; this is not full required coverage.` : run.modelChecks ? 'Infrastructure unverified. Six-prompt model checks only; upgrade, project isolation and client-specific cases were omitted.' : run.required ? 'Required matrix execution. A passing report still requires the separate release evidence verification.' : 'Reduced or focused coverage. This report is not full required release sign-off.';
   const matrix = buildMatrix(cells, clients.map(c => c.id));
   const failures = attention(failed.map(c => (findingContext({ ...c, checks: (c.checks || []).filter(ch => !ch.ok) }, run.models))));
   return page('Run results', outcome, scope,
@@ -68,7 +68,7 @@ export function renderSweepHtml(summary) {
   const rows = summary.rounds || [];
   const counts = rows.reduce((a, r) => { for (const [k, n] of Object.entries(r.counts || {})) a[k] = (a[k] || 0) + n; return a; }, {});
   const costs = summary.costs || combineCosts(rows.map(r => r.costs));
-  const scope = summary.infrastructureVerified ? `Model checks with verified prior baseline ${summary.baseline}; not full required coverage.` : 'Infrastructure unverified. This sweep compares model behavior; upgrade, project isolation and client-specific cases were omitted.';
+  const scope = summary.profile === 'high' ? 'High: all scenarios and upgrades, with a directed cross-client cycle for each round’s selected clients. Not release sign-off.' : summary.profile === 'xhigh' ? 'XHigh: all scenarios and upgrades, with every ordered cross-client pair for each round’s selected clients. Not release sign-off.' : summary.profile === 'simple' ? 'Simple: three prompts per client covering capture, fresh-session recall and an unrelated answer. Upgrade and client-specific checks are omitted.' : summary.infrastructureVerified ? `Model checks with verified prior baseline ${summary.baseline}; not full required coverage.` : 'Infrastructure unverified. This sweep compares model behavior; upgrade, project isolation and client-specific cases were omitted.';
   const finished = rows.length && rows.every(r => r.report);
   const findings = rows.flatMap(r => r.failures || []);
   const serviceChecks = findings.filter(f => f.diagnosis?.category === 'Service or runtime').length;

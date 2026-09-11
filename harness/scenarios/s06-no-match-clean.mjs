@@ -1,3 +1,4 @@
+import { experimentPrompt, experimentChecks } from '../lib/experiment.mjs';
 import { check, forbiddenHits, isMidbrainTool } from '../lib/checks.mjs';
 import { runTurn, turnChecks, cell, relEvidence } from './_shared.mjs';
 
@@ -9,8 +10,10 @@ export default {
   parity: true,
   rows: ['No-match clean'],
   async run({ ctx, client, project }) {
-    const prompt = 'What is the capital of Australia? Answer in one short sentence.';
-    const expected = 'Answer contains "Canberra" and no MidBrain process language, no memory-tool names, no marker text, no "not found after search".';
+    const vars = { client: client.id };
+    const prompt = experimentPrompt(ctx, 'unrelated', vars);
+    const custom = Boolean(Object.keys(ctx.options.experiment?.prompts?.unrelated?.criteria || {}).length);
+    const expected = custom ? 'The answer satisfies the configured criteria.' : 'Answer contains "Canberra" and no MidBrain process language, no memory-tool names, no marker text, no "not found after search".';
     const t = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'turn-1' });
     const hits = forbiddenHits(t.finalText);
     const memCalls = t.toolCalls.filter(isMidbrainTool).length;
@@ -18,8 +21,8 @@ export default {
       notes: `MidBrain tool calls made on an unrelated prompt: ${memCalls} (informational)`,
       checks: [
         ...turnChecks(t),
-        check('answer contains Canberra', /canberra/i.test(t.finalText)),
-        check('answer free of MidBrain process language and markers', hits.length === 0, hits.length ? `hits: ${hits.join(' ; ')}` : ''),
+        ...(custom ? experimentChecks(ctx, 'unrelated', t, vars) : [check('answer contains Canberra', /canberra/i.test(t.finalText)),
+        check('answer free of MidBrain process language and markers', hits.length === 0, hits.length ? `hits: ${hits.join(' ; ')}` : '')]),
       ] })];
   },
 };

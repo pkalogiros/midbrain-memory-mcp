@@ -43,3 +43,14 @@ describe('simple cross-client coverage', () => {
     expect(report).toContain('not full required coverage');
   });
 });
+
+
+it('maps named coverage profiles and rejects conflicting choices', async () => {
+  const { profileOptions } = await import('../harness/lib/profiles.mjs');
+  expect(profileOptions({ high: true })).toMatchObject({ simple: true, upgrade: true, mode: 'registry' });
+  expect(profileOptions({ xhigh: true, required: true })).toMatchObject({ simple: false, required: true, upgrade: true });
+  expect(profileOptions({ simple: true })).toEqual({ simple: true });
+  expect(() => profileOptions({ simple: true, high: true })).toThrow('Choose one');
+  expect(() => profileOptions({ high: true, required: true })).toThrow('--xhigh --required');
+  expect(() => profileOptions({ xhigh: true, config: 'custom.json' })).toThrow('cannot combine');
+});

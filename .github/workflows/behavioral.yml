@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Smoke, simple cycle, or full required matrix'
+        description: 'Simple, High, XHigh, smoke, or required release validation'
         type: choice
-        options: [smoke, simple, required]
+        options: [smoke, simple, high, xhigh, required]
         default: smoke
       anthropic_model:
         description: 'Anthropic model used by Claude, OpenCode, Hermes and NanoClaw'
@@ -111,7 +111,9 @@ jobs:
           set -euo pipefail
           case "$MIDBRAIN_CI_SUITE" in
             smoke) args=(--mode registry --scenarios s01,s06) ;;
-            simple) args=(--mode registry --upgrade --simple) ;;
+            simple) args=(--mode registry --simple) ;;
+            high) args=(--high) ;;
+            xhigh) args=(--xhigh) ;;
             required) args=(--mode registry --upgrade --required) ;;
             *) exit 2 ;;
           esac

@@ -1,45 +1,38 @@
-# Multi-client testing: architecture, operation and release evidence
+# Testing MidBrain across AI clients
 
-Companion to the [design and coverage map](multi-client-harness.md),
-[CLI commands](../../harness/README.md), and [workflow setup](behavioral-ci.md).
-Updated 2026-09-10 against branch `multi-client-harness-review`.
+**Run this** from the repository root, after [one-time setup](#local-setup):
 
-Start with [architecture](#architecture) to understand the system, [local setup](#local-setup)
-to prepare a machine, [run recipes](#choose-and-run-a-suite) to execute it, or
-[reading results](#how-to-read-and-parse-results) to investigate an existing run.
-For changes to coverage, see [prompt locations](#where-to-find-and-edit-the-prompts).
-For command options, see the [argument reference](#commands-and-arguments).
+```bash
+node harness/run.mjs run --simple --mode registry --clients claude,codex,hermes,nanoclaw --concurrency 4
+```
+
+Runs three prompts each in Claude, Codex, Hermes and NanoClaw. Progress appears in the
+terminal. When it finishes, open the printed `report.html` path. Press Ctrl+C to stop.
+
+For more coverage, replace `--simple` with `--high` or `--xhigh`.
+
+---
 
 ## What it is
 
-The harness tests a release candidate of `midbrain-memory-mcp` against defined checks in five
-default AI clients: OpenCode, Claude Code, Codex, Hermes and NanoClaw. Pi is also
-supported explicitly with `--clients pi` or a list such as `--clients claude,pi`;
-the default and required five-client matrix is unchanged. Behavioral runs use real
-models, product hooks and the MidBrain API, with controlled fixtures and a local NanoClaw
-mailbox transport. Unit tests separately mock dependencies to test harness logic.
+The harness checks whether real AI clients can save and retrieve memory through MidBrain.
+It installs the version under test in a temporary home, sends prompts, and checks the
+answers against stored memories, tool calls and hook logs. Reports show **PASS**, **FAIL**
+or **BLOCKED** for each check.
 
-Pi support is also a product change: the published package includes its adapter,
-extension and installer detection. Only its harness selection is opt-in. Include
-Pi in the release notes and product review; it is not merely a test driver.
+The default clients are OpenCode, Claude Code, Codex, Hermes and NanoClaw. Add Pi with
+`--clients claude,pi` or test it alone with `--clients pi`. Pi's installer integration
+ships in the product, even though tests only include it when selected.
 
-It builds the candidate into a tarball, lets the product's own installer configure real client
-installs inside a throwaway home, drives real model sessions with fixed prompts, and scores
-what actually happened from raw evidence: rows read back from the MidBrain API, tool calls in
-the client's own transcript, and the product's hook logs. The result is one side-by-side
-PASS / FAIL / BLOCKED matrix per run. Implemented scenarios are not proof of a passing
-release: the complete required matrix still needs to pass on the intended candidate.
-
-NanoClaw coverage uses its upstream runner through the local mailbox; external messaging
-integrations and the full host dispatcher are not exercised.
+Runs use real models and a real MidBrain API. NanoClaw uses its upstream runner in Docker
+with a local test mailbox; external messaging integrations are outside these tests.
 
 ## Architecture
 
-There are two complementary test lanes. The existing programmatic suite checks installation,
-configuration, credentials, tools, repair, recovery, packaging and isolation in code. Its
-[CI workflow](../../.github/workflows/ci.yml) runs tests on Linux, macOS and Windows.
-The behavioral harness checks whether real clients actually capture and use memory in
-model sessions. A green programmatic suite does not establish a green behavioral matrix.
+There are two kinds of tests:
+
+- **Code tests** check installation, configuration, credentials and recovery without paid model calls. CI runs them on Linux, macOS and Windows.
+- **Client tests** use real models to check whether memory is saved and used correctly. Passing code tests alone does not prove this works.
 
 ```mermaid
 flowchart TB
@@ -67,12 +60,9 @@ flowchart TB
     Bundle --> Verify["Verify against exact release archive and source SHA"]
 ```
 
-The harness controls prompts and collects evidence; the **product** performs memory writes
-and retrieval. Its verification API client reads stored rows independently. This separates
-“the assistant said it remembered” from “the right value appeared in a successful memory
-tool result and in the answer.” Both the provider APIs and the memory backend are real in
-a behavioral run. A local memory backend removes the MidBrain cloud dependency, but client
-model calls still use their configured providers.
+The product saves and retrieves memories; the harness checks the results independently.
+A recall check needs the right value in both a successful memory tool result and the
+assistant's answer. Running MidBrain locally still requires access to the model providers.
 
 ### Why these boundaries exist
 
@@ -80,7 +70,7 @@ model calls still use their configured providers.
 |---|---|
 | Product adapters vs harness manifests | Product adapters install and repair integrations; harness manifests launch clients and interpret their evidence. Client CLI changes should stay in the driver. |
 | Frozen package vs live checkout | Sessions execute preserved candidate bytes, so an edit during a long run cannot silently change the tested product. Recorded input changes fail checks. |
-| Private home vs real home | Configuration, credentials, projects and caches belong to this run. A before/after tripwire detects changes to enumerated host surfaces. It is detection, not a security sandbox. |
+| Private home vs real home | Configuration, credentials, projects and caches belong to this run. A before/after comparison checks for changes to known client configuration files. This detects changes but does not prevent them. |
 | Native hooks vs verification readback | Hook execution must come from the client. Readback proves what reached the API; the harness does not replay a failed hook to manufacture a pass. |
 | Scenarios vs scoring vs rendering | Prompts exercise behavior, checks evaluate evidence, and the report displays those checks. Export reuses the same results and renderer. |
 | Private run vs shareable bundle | Debugging needs detailed local evidence. Review needs selected, redacted evidence and candidate identity, without credential-bearing homes. |
@@ -88,7 +78,7 @@ model calls still use their configured providers.
 ### Capture and cross-client recall, end to end
 
 This illustrates one S2 pair. The hidden value is supplied only to the writer; the reader
-gets the retrieval anchor. A new reader session prevents conversation history from supplying
+gets only the task identifier to search for. A new reader session prevents conversation history from supplying
 the answer. S1 separately checks capture counts and metadata in detail.
 
 ```mermaid
@@ -139,7 +129,7 @@ the same checks; it does not promise identical answers, tokens or latency on eve
    product's own client adapters whether each install is present and "fresh" (canonical hooks,
    plugin, shim).
 6. **Scenarios, in a fixed order.** S1 capture, S6 no-match, S8 literal markers, S3 fresh-session
-   continuity, S2 cross-client recall (every ordered pair by default; one cycle with `--simple`), S5 current-vs-stale,
+   continuity, S2 cross-client recall (every ordered pair by default; one cycle in the model-check profile), S5 current-vs-stale,
    S4 project/global isolation, S9 upgrade continuity, S10 client-specific cases. The S9
    upgrade prelude runs before this sequence. Clients execute real sessions; exact prompts,
    raw streams and normalised turns are saved. Capture and recall scenarios use markers,
@@ -151,7 +141,7 @@ the same checks; it does not promise identical answers, tokens or latency on eve
    rerun until green. Polling retries transient reads, and NanoClaw may natively retry
    response formatting; every native reply must still be captured exactly once. See [failure handling](#missing-prerequisites-and-failure-handling) for client setup, aborts and partial results.
 
-8. **Tripwire and report.** Hash enumerated host config surfaces before and after; detected drift
+8. **Check configuration and write reports.** Compare known host configuration files before and after; unexpected changes
    fails the run. Render `report.md` and `results.json`. Exit 0 for a nonempty run containing only PASS or BLOCKED cells
    with clean isolation. BLOCKED means incomplete coverage; failed checks exit 1. `--required` additionally requires registry+upgrade mode and the
    full client/scenario selection. A focused green run is only a checkpoint.
@@ -169,26 +159,29 @@ capture, literal preservation and recall; see [fast model sweeps](#fast-model-ch
 
 ## Missing prerequisites and failure handling
 
-The harness launches selected clients and handles known failure cases with explicit checks. It does not autonomously troubleshoot the machine or install every missing prerequisite. A failure can affect one client, one scenario, or the whole run.
+Run `node harness/run.mjs doctor` before testing. It checks the API and client setup;
+read each client's result, since READY only means at least one client can run.
 
-| Situation | What the harness does |
+| Problem | What happens |
 |---|---|
-| OpenCode or Hermes is not installed | Installs a run-local copy using npm or uv, respectively. Those package managers must already be available; the harness does not install them. |
-| Claude Code or Codex is missing; a client prerequisite or provider credential is missing | Marks that client BLOCKED with the reason and continues with runnable clients. This also applies when a run-local client install or preflight fails. Cross-client coverage affected by unavailable clients is recorded as BLOCKED. |
-| Docker is unavailable for NanoClaw | Marks NanoClaw BLOCKED and continues with the other runnable clients. With prerequisites available, the default preparation path clones the pinned runner and builds its image; a configured prepared image must already be present. |
-| Client setup fails after the product installer | Records a failed Clean install check for that client and blocks its later scenarios. Other runnable clients continue. |
-| A scenario cannot run or throws an error | Catches the error at the scenario boundary, records BLOCKED for an explicit dependency error or FAIL for an unexpected harness error, then continues the remaining scenarios. |
-| A command takes too long or memory readback is delayed | Client commands have timeouts. Readback polls within a bounded window and can tolerate transient read errors; exhausted waits are evaluated by the scenario checks. Failed cells are not automatically rerun until green. |
-| The shared MidBrain key is missing, the initial API probe fails, or run options are invalid | Stops the whole run with an error and nonzero exit. There is no automatic cloud-to-local fallback. Local hosting requires separately starting the backend and seeding its keys before running the harness. |
-| An error escapes the per-client or per-scenario handlers | Can abort the run before results.json and report.md are produced. Candidate packaging, registry startup, filesystem operations, or final verification can fail outside those handlers; a complete report is not guaranteed. |
+| OpenCode or Hermes is missing | Installs a private copy. npm or uv must already be available. |
+| Another client, credential or Docker is missing | Marks the affected client and dependent tests BLOCKED; other clients continue. |
+| Client setup fails | Fails its install check and blocks its later tests. |
+| A test cannot run | Records BLOCKED for a missing prerequisite, or FAIL for an unexpected error. Other tests continue. |
+| A command or memory check takes too long | Stops waiting at its timeout and records the result. Failed tests are not automatically rerun. |
+| The shared key, API check or run options are invalid | Stops the run before testing. There is no automatic switch to another backend. |
+| Packaging, registry startup or file operations fail | May stop before a complete report is written. |
 
-Run `node harness/run.mjs doctor` before a costly run to inspect prerequisites. Doctor is a separate command, not an automatic repair step. Its READY summary means at least one client is runnable and shared checks passed; inspect every client row for BLOCKED entries.
+`results.partial.json` saves progress after each scenario. It may omit the interrupted
+scenario, and early setup failures may leave no results. Keep the logs, fix the cause,
+and start a new run.
 
-The harness writes `results.partial.json` after each completed scenario across its selected clients or pairs. After an interruption, that checkpoint may omit the scenario that was in progress; an early setup failure may leave no checkpoint. Preserve the existing evidence for diagnosis, fix the reported cause, and start a new run. Partial results are not a completed run or release evidence.
+Normal completion and Ctrl+C stop the test registry and owned NanoClaw containers.
+The run directory stays available for debugging. A force-kill or host crash can prevent
+cleanup; a separately started MidBrain backend stays running.
 
-Run cleanup is attempted on normal completion, errors inside the run cleanup scope, and handled SIGINT/SIGTERM. It stops the loopback registry and removes owned NanoClaw containers; the private run directory remains for inspection. SIGKILL or host failure can prevent cleanup, and the separately started local backend stays running until explicitly stopped.
-
-Continuing after a failure does not make the run successful: FAIL, BLOCKED, SKIP, an empty run, or detected real-home drift produce a nonzero exit. Product self-repair exercised by the scenarios is separate from the harness handling its own infrastructure failures.
+BLOCKED leaves a test unverified but does not fail the run. FAIL, FLAKY, SKIP, empty
+results or changes to the user's client configuration cause a nonzero exit.
 
 ## What each file does
 
@@ -276,8 +269,8 @@ client-specific behavior can require additional cases; those are declared by the
 | `_shared.mjs` | `runTurn` (persists prompt, turn, asserts frozen inputs), `readback` (poll by marker), metadata and turn checks, cell constructor. |
 | `index.mjs` | Execution order. |
 | `s01-capture.mjs` | User and assistant rows reach the API with matching client/session/cwd metadata and marker text. Exactly one user capture and one capture per native assistant reply. |
-| `s02-cross-client-recall.mjs` | Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. Each writer stores one checkpoint that every reader reads (five writes, twenty reads). All ordered pairs by default; `--simple` selects one directed cycle. |
-| `s03-fresh-session-continuity.mjs` | A checkpoint written in one session is recovered in a new session of the same client. In simple mode with the upgrade prelude, scored on the prelude's own write and fresh-session recall. |
+| `s02-cross-client-recall.mjs` | Writer stores a hidden value; another client's fresh session must retrieve it through a MidBrain call. Each writer stores one checkpoint that every reader reads (five writes, twenty reads). XHigh checks all ordered pairs; High and the separate model-check profile select one directed cycle; Simple omits S2. |
+| `s03-fresh-session-continuity.mjs` | A checkpoint written in one session is recovered in a new session of the same client. Current Simple reuses the capture checkpoint and sends one fresh-session recall prompt. |
 | `s04-project-global-isolation.mjs` | Project-scoped key isolates from global; global fallback works from an unscoped directory. The global marker is S1's capture (same project and credential), so only the project write is new. |
 | `s05-freshness-reconciliation.mjs` | After an update, a new session names the current value as current, as JSON, citing memory evidence. Conflicting live repository/file state is not tested. |
 | `s06-no-match-clean.mjs` | An unrelated question gets a clean answer with no memory process language; it does not force an unsuccessful memory lookup. |
@@ -360,7 +353,7 @@ const readPrompt = `Search your MidBrain memory for task ${m} and tell me its ex
 
 `${m}` is the retrieval anchor; `${value}` is generated for the writer. The reader must
 recover the value through MidBrain. Giving the value to the reader would invalidate the test.
-`--simple` selects fewer S2 pairs; it uses these same prompts and checks.
+High and the model-check profile select a directed cycle of S2 pairs. XHigh checks every ordered pair. Simple omits S2.
 
 To inspect **what was actually sent**, open the private run's
 `evidence/<client>/<scenario>/<label>.prompt.json`. The shared
@@ -419,7 +412,7 @@ Fresh session:
 > Use memory to find the checkpoint for task [TASK_ID] and tell me the exact next step, quoting both function names.
 
 Checks that the new session has a different session id and recovers both names through a
-MidBrain call. In simple mode this is scored on the upgrade prelude's own write and recall.
+MidBrain call. Simple uses its capture checkpoint and a new recall turn. High reuses an upgrade prelude when available; older broad Simple reports use the same approach.
 
 **4. Distinguish current information from outdated information (S5)**
 
@@ -436,7 +429,7 @@ Fresh session:
 > What is the current deploy target for task [TASK_ID]? Return only JSON with keys "current" (the target name) and "evidence" (the state-changing memory you used).
 
 Checks that the answer names the updated target as current, as JSON, and that a MidBrain call
-retrieved the state-changing row. In simple mode the initial message is the client's own S2
+retrieved the state-changing row. In High and the model-check profile, the initial message is the client's own S2
 checkpoint and the update speaks of its verification value instead.
 
 **5. Project and global isolation (S4)**
@@ -451,7 +444,7 @@ Asked from the global-key directory, then from the project directory, then from 
 
 Checks that the project marker is not found under the global key and is found under the
 project key, and that a global marker is found from an unscoped directory. The global marker is
-S1's own capture. Simple mode omits the third ask.
+S1's own capture. High omits the third ask; Simple omits S4 entirely.
 
 **6. Clean answer to an unrelated question (S6)**
 
@@ -703,24 +696,35 @@ fields, NanoClaw estimates use transcript usage, and older Hermes accounting was
 Codex costs, runner charges and backend costs are excluded from the Anthropic figures.
 The historical Codex runs used a ChatGPT login; the workflow uses separately billed OpenAI API auth.
 
-| Run type | Scope and models | Observed duration | Historical Anthropic spend | Evidence / limitation |
+| Run type | Scope and models | Observed duration | Available API spend (excludes Codex) | Evidence / limitation |
 |---|---|---|---|---|
 | Programmatic | Build, lint, tests, isolation; no models | Varies by machine; recent local checks under 2 min | $0 model usage | Not a behavioral matrix; runner compute still has a cost. |
 | Smoke | Claude, OpenCode, Hermes, NanoClaw; Haiku 4.5; S1/S6; dev mode | 2.0 min | About $0.09 | `20260910-080525-06d1` (32 PASS, on the reuse changes) and `20260909-083217-0fbb`; eight prompts, excludes Codex, differs from five-client workflow smoke. |
 | Focused | One/two clients and selected scenarios | Depends on selection; one retained run took about 6 min | Varies | `20260908-090053-5472`; a targeted run is not comparable to full coverage. |
-| **Simple (Default)** | Five clients, all scenarios, upgrades, five S2 links; concurrency 3 | **33m 52s** | Not measured for this run | `20260910-082009-e52c`: 87 PASS / 7 FAIL; real-home isolation passed. Reduced coverage, not required sign-off. |
-| Model-check sweep | Claude, Codex, Hermes, NanoClaw; two rounds, 48 prompts; four total workers | **11m 36s** including cleanup | Not measured | Sweep `20260910-101821-a704`: 113 PASS / 7 FAIL; both homes isolated. Haiku 4.5 and Sonnet 4.5 rounds; Codex uses `gpt-5.6-sol` in both. Infrastructure omitted and unverified. |
-| Eight-worker attempt | Same two-round model-check profile, four workers per round | No model timing available | No model prompts started | `20260910-103509-f3c0`: both rounds stopped at the local API probe with HTTP 401. Eight-worker speedup is not yet measured. |
-| **Full matrix** | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | Broader cross-client confidence. `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
-| Required attempt | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
+| **`--simple`** | Claude, Hermes and NanoClaw on Haiku 4.5; Codex on `gpt-5.6-sol`; one combination, 12 attempts, concurrency 4 | **4m 37s** | **$0.1785 subtotal**; incomplete | `20260910-181234-373c`: original 37 PASS / 3 FAIL / 0 BLOCKED; isolation passed. One Claude scoring false negative is now diagnosed; NanoClaw recall and Docker failures remain. Costs recorded for 11/12 attempts; Codex $0.1403 API-equivalent is separate. |
+| `--model-checks` sweep (latest costed) | Same four clients; Haiku 4.5 and Sonnet 4.5 rounds, Codex `gpt-5.6-sol`; 48 planned / 40 attempted prompts; four workers | **22m 46s** | **$1.475591 subtotal**; incomplete | `20260910-135656-d7cc`: 87 PASS / 17 FAIL / 16 BLOCKED; isolation passed. 38/40 attempts have cost records. Codex $0.609012 API-equivalent is separate. Infrastructure omitted; not release sign-off. |
+| **`--high`** (historical equivalent) | Five clients, all scenarios, upgrades, five S2 links; concurrency 3 | **33m 52s** | Not measured for this run | `20260910-082009-e52c`: 87 PASS / 7 FAIL; real-home isolation passed. Reduced coverage, not required sign-off. |
+| `--model-checks` sweep (earlier) | Claude, Codex, Hermes, NanoClaw; two rounds, 48 prompts; four total workers | **11m 36s** including cleanup | Not measured | Sweep `20260910-101821-a704`: 113 PASS / 7 FAIL; both homes isolated. Haiku 4.5 and Sonnet 4.5 rounds; Codex uses `gpt-5.6-sol` in both. Infrastructure omitted and unverified. |
+| `--model-checks` sweep (eight-worker attempt) | Same two-round model-check profile, four workers per round | No model timing available | No model prompts started | `20260910-103509-f3c0`: both rounds stopped at the local API probe with HTTP 401. Eight-worker speedup is not yet measured. |
+| **`--xhigh`** (historical equivalent) | Five clients, Haiku 4.5 for Anthropic clients; upgrades, 20 S2 pairs | About 83 min | About $2 | Broader cross-client confidence. `20260909-083452-4fdd`; 108 PASS / 16 FAIL / 1 BLOCKED, non-required checkpoint. |
+| `--xhigh --required` (historical equivalent) | Claude Opus 5 (1M), OpenCode Sonnet 4.6, Hermes/NanoClaw Sonnet 4.5 | About 116 min | About $10 | `20260908-093157-c670`; 93 PASS / 27 FAIL / 1 BLOCKED. This was a mixed-model run, not an all-Opus comparison. |
+
+The historical High/XHigh rows describe equivalent coverage before those flags were named;
+no fresh High or XHigh timing has been measured since adding the flags. Simple's **4m 37s**
+is one model combination, not an entire multi-model sweep. Historical failures and 401s
+remain part of the run record; this table does not claim they were reproduced after fixes.
 
 Fixed indexing/readback waits, container startup, tool output, model latency, context and
 native retries all affect the total. A prompt can trigger several provider calls, so neither
 prompt count nor the number of result cells is a reliable bill by itself.
 
-### Latest recorded costs
+### Recorded model-check sweep costs
 
-The new four-client/two-round sweep `20260910-135656-d7cc` took **22m 46s**
+The latest three-prompt Simple measurement is **4m 37s**, with an incomplete **$0.1785**
+API subtotal, as shown above. The detailed accounting below belongs to the earlier,
+larger model-check sweep; it is not the price of the current Simple profile.
+
+The four-client/two-round sweep `20260910-135656-d7cc` took **22m 46s**
 with four workers: **87 PASS / 17 FAIL / 16 BLOCKED**. Both real-home isolation checks
 passed. Of 48 planned prompts, 40 were attempted and 38 returned turn records;
 API readback failures prevented the eight final freshness questions. This is a failed
@@ -802,8 +806,9 @@ models; actual token counts, answers, tool calls and retries can change.
 
 For your own estimate, use `sum(tokens_in_category × category_rate / 1,000,000)` across clients,
 then add Codex API usage and runner/backend charges. Check account-specific pricing before
-budgeting. No completed simple-mode cost measurement is recorded here, so do not scale the
-whole bill by its 75% reduction in S2 pairs. The harness has no dollar-budget flag or automatic
+budgeting. The historical broad Simple run (now called High) has no recorded cost total;
+do not scale its whole bill by the reduction in S2 pairs. The current three-prompt Simple
+measurement is recorded below, with its missing usage explicitly noted. The harness has no dollar-budget flag or automatic
 billing cutoff; timeouts limit duration, not spend.
 
 The workflow offers Haiku 4.5 and Sonnet 5 for the Anthropic clients. Neither a cheaper model
@@ -815,7 +820,8 @@ triaged; they are not automatically waived as model noise.
 
 For model iteration, `--model-checks` runs six prompts per client when at least two
 clients form a recall cycle. It uses registry mode and fresh homes, sessions, projects
-and markers. It is a smaller profile than Simple, not an accelerated full validation.
+and markers. It covers more recall behavior than three-prompt Simple, but omits the infrastructure
+cases included in High and XHigh.
 
 | Prompt | Evidence checked |
 |---|---|
@@ -880,7 +886,7 @@ finish. SIGINT/SIGTERM cancel active rounds and invoke registry/container cleanu
 For repeated runs of the same candidate, first establish a baseline:
 
 ```bash
-node harness/run.mjs run --clients claude,codex,hermes,nanoclaw --mode registry --upgrade --simple --scenarios s01,s04,s09,s10 --concurrency 4 --keep
+node harness/run.mjs run --clients claude,codex,hermes,nanoclaw --mode registry --upgrade --scenarios s01,s04,s09,s10 --concurrency 4 --keep
 ```
 
 The baseline must be a completed original registry run with clean real-home isolation.
@@ -906,40 +912,153 @@ The local baseline attempt `20260910-094834-a2b4` recorded 37 PASS / 7 FAIL with
 isolation. It does not qualify for four-client reuse. The 11m 36s measurement therefore
 used standalone model checks, not a successful baseline-follow-up run.
 
+## Three-prompt Simple runs and custom experiments
+
+Choose the coverage level (these names do not change the model):
+
+| Flag | Coverage |
+|---|---|
+| `--simple` | Three prompts per client: capture, fresh-session recall, unrelated answer. |
+| `--high` | Previous broad Simple: all scenarios and upgrades, one loop of memory-sharing checks, with shared setup and capture reuse. |
+| `--xhigh` | Full coverage: all scenarios and upgrades, memory sharing in both directions between every pair of clients. |
+
+High and XHigh automatically enable registry mode and upgrades. Both accept `--clients`;
+coverage applies to the selected clients. Use `run --xhigh --required` for the complete
+release gate. Custom `--config` experiments apply to Simple only.
+
+```bash
+node harness/run.mjs run --simple --mode registry --clients claude,codex,hermes,nanoclaw --concurrency 4
+node harness/run.mjs run --high --clients claude,codex,hermes,nanoclaw --concurrency 4
+node harness/run.mjs run --xhigh --clients claude,codex,hermes,nanoclaw --concurrency 4
+```
+
+Sweeps also accept `--simple`, `--high` or `--xhigh`, applying that coverage to each
+round’s model/client selection. `--required` is only available on `run`.
+
+**Simple = save a fact, recall it in a new session, answer an unrelated question.**
+It sends at most three prompts per client. If capture fails, the dependent recall is
+BLOCKED without sending a prompt. Tool calls and verification polling add API requests;
+three prompts does not mean exactly three HTTP requests.
+
+### Make a custom run: edit one file, run one command
+
+Start with [`harness/examples/simple.json`](../../harness/examples/simple.json):
+
+```json
+{
+  "models": {
+    "claude": "claude-haiku-4-5",
+    "codex": "gpt-5.6-sol",
+    "hermes": "claude-haiku-4-5",
+    "nanoclaw": "claude-haiku-4-5"
+  },
+  "prompts": {
+    "unrelated": {
+      "prompt": "What is the capital of France? Answer in one short sentence.",
+      "criteria": { "contains": ["Paris"], "notContains": ["memory_search"] }
+    }
+  }
+}
+```
+
+```bash
+node harness/run.mjs run --config harness/examples/simple.json --mode registry --concurrency 4
+```
+
+That runs the three Simple scenarios on the four listed clients/models. Capture and
+recall use built-in prompts; the unrelated question uses your prompt and criteria.
+Remove a model entry to omit that client. Change a model name to try another model.
+Supported client IDs are `claude`, `codex`, `hermes`, `nanoclaw`, `opencode`, and `pi`.
+Credentials stay in `harness/.env` or the environment, never in the config.
+
+### Change only what you need
+
+| Want to change… | Edit… |
+|---|---|
+| Clients and models | `models`: client ID → model name. Alternatively, `clients` can select clients using their environment/default models. |
+| Which tests run | Optional `scenarios`: `["capture", "recall", "unrelated"]` by default. For just your custom question, use `["unrelated"]`. Recall requires capture. |
+| A question | `prompts.capture`, `prompts.recall`, or `prompts.unrelated`, each with a `prompt`. Omitted entries use defaults. |
+| What passes | `criteria.contains` / `notContains` check final-answer substrings; `memoryContains` checks successful recorded memory evidence. All listed criteria must pass. Matching is case-sensitive. |
+
+Capture/recall templates use `{{marker}}` for the unique task ID and `{{value}}` for the
+hidden fact. Capture must include both; recall must include the marker and must **not**
+include the hidden value. `{{client}}` inserts the client ID. Capture and recall retain
+their built-in storage, fresh-session and evidence checks; custom criteria add to them.
+A custom unrelated prompt must specify its own criteria. These are substring checks,
+not exact equality or an AI judge: `contains: ["4"]` also matches `"42"`.
+
+Use `MIDBRAIN_HARNESS_CONFIG` instead of `--config` if you prefer environment settings.
+Existing `MIDBRAIN_HARNESS_<CLIENT>_MODEL` variables override config model names;
+`--clients` overrides the selected clients. The run saves its configuration, selected
+models, actual prompts, results, costs and failure traces for debugging.
+
+For multiple model combinations, keep the existing model-rounds JSON and use:
+
+```bash
+node harness/run.mjs sweep --simple --models /absolute/path/to/models.json --config harness/examples/simple.json --parallel-runs 2 --concurrency 4
+```
+
+Each round supplies its client/model selection; the experiment supplies the prompts and
+criteria. Omit `--config` for the built-in questions. Simple excludes upgrades,
+cross-client recall, updated-fact reconciliation and special-client cases. Use the full
+matrix for those; do not combine Simple with `--upgrade`, `--required` or `--scenarios`.
+
+### How much faster and cheaper?
+
+| Comparable selection | Before | Three-prompt Simple | Prompt reduction |
+|---|---:|---:|---:|
+| Four clients, two model rounds | 48 planned prompts (six-prompt model checks) | 24 | 50% |
+| Four clients, one round | 47 planned prompts (historical broad Simple with upgrades) | 12 | About 74% |
+
+In the completed `20260910-135656-d7cc` sweep, the capture, fresh-session recall and
+unrelated-question attempts accounted for **$0.7952** of the **$1.4756** available API
+subtotal: **46% lower** when retaining just those attempts. This is an allocation of
+historical costs to the retained scenarios, **not a measured run of the new profile**.
+The original run attempted 40 of its 48 planned prompts; the retained scenarios account
+for 24 attempts, with two NanoClaw launch failures lacking cost records. Amounts mix
+reported charges and token-based estimates and exclude runner/backend costs.
+Codex's ChatGPT API-equivalent falls separately from $0.6090 to $0.3184; that is not
+an extra subscription charge.
+
+**Measured minimized run after repairing the local API:**
+`20260910-181234-373c` completed in **4m 37s**, with **12 prompt attempts** across
+Claude/Haiku, Codex/gpt-5.6-sol, Hermes/Haiku and NanoClaw/Haiku. The available API subtotal
+was **$0.1785**; Codex's **$0.1403 API-equivalent** is separate and is not an extra charge.
+Costs were recorded for 11 of 12 attempts; NanoClaw's Docker-failed attempt has no cost
+record, so the subtotal is incomplete. Real-home isolation passed.
+
+Original scores: **37 PASS / 3 FAIL / 0 BLOCKED**. Claude returned the correct fact via
+a quoted MidBrain result-file path that the original scorer missed; the scorer now
+recognizes that path, and the saved report labels the false negative without rewriting
+its original verdict. NanoClaw returned similar memories without finding the exact target
+and later encountered a Docker inspection timeout. This is a completed diagnostic run,
+not an all-green release gate. The earlier two attempts stopped at the 60-second API
+preflight with zero prompts, before the core authentication fix and API restart.
+
+The 4m 37s measurement is for **one model combination**, not the two-round sweep.
+It is not directly comparable to the earlier 22m 46s two-round run. The prompt reductions
+above are exact; runtime and token costs depend on the chosen models, tool use and
+service health.
+
+
 ## Choose and run a suite
 
-“Default” marks the recommended everyday choice in this guide; it does not change CLI or
-GitHub workflow defaults. Select Simple explicitly with `--simple` or `suite=simple`.
+After [setup](#local-setup), choose one of these runs. The profile controls coverage;
+you choose the models separately.
 
-The two main behavioral choices are **Simple** for everyday iteration and **Full matrix**
-for exhaustive cross-client coverage. Simple keeps all implemented scenarios and upgrades,
-but checks five S2 links instead of twenty; it can miss failures specific to the omitted
-client pairs. Full matrix checks every ordered pair. For release evidence, run that full
-matrix with `--required`, which enforces complete selection and registry+upgrade mode.
-Required is a stricter use of the full matrix, not a larger suite or a premium model tier.
+| Command | What it checks |
+|---|---|
+| `--simple` | Save a fact, recall it in a new session, answer an unrelated question. Three prompts per client. Start here. |
+| `--high` | All scenarios and upgrades. Each client shares a memory with the next client in a loop. This was the old Simple profile. |
+| `--xhigh` | All scenarios and upgrades. Every client retrieves a memory from every other client. |
+| `--xhigh --required` | Full release coverage. Release verification requires all checks to pass. |
+| `--model-checks` | Six prompts per client for model comparisons; omits upgrade, project isolation and client-specific tests. |
 
-Keep programmatic checks as the no-model prerequisite. Smoke is useful for a first setup
-check; focused runs help diagnose a failure. Neither needs to precede every Simple run.
-The model-backed commands below incur provider usage; `npm run check` does not run a paid
-behavioral matrix. These are coverage choices, not statistical confidence guarantees.
+High and XHigh enable registry mode and upgrades automatically. Simple must be selected
+explicitly. Use `--clients` for a subset, or `--scenarios` for focused debugging outside
+Simple; `--required` forbids subsets.
 
-| Run | Purpose | Can establish the full required gate? |
-|---|---|---|
-| Programmatic | Build, lint, tests, docs and isolation gates | Separate prerequisite |
-| Smoke | S1 capture and S6 clean unrelated answers in all five clients | No |
-| Model checks / sweep | Six prompts per client, optionally across concurrent model rounds; infrastructure unverified unless a valid baseline is reused | No |
-| **Simple (Default)** | Everyday behavioral checks: all scenarios and upgrades, with one cross-client cycle | No |
-| **Full matrix** | Broader validation: all scenarios, upgrades and every ordered cross-client pair | Only when run as Required below |
-| Required | Full matrix with enforced release-coverage requirements | Yes, if complete, all checks pass and evidence verifies |
-| Focused | Selected clients/scenarios while diagnosing a failure | No |
-
-“Light” means **simple** in this guide; there is no `--light` flag. Smoke is smaller again.
-“Full” means all ordered pairs; use `--required` with registry+upgrade when collecting
-release evidence. Omitting `--simple` alone does not mark the run as required.
-
-Run each command as a separate operation; these are alternatives, not a script that must
-execute all paid suites in sequence. Run from the repository root after completing
-[local setup](#local-setup), pinning models and checking readiness.
+Run the commands below separately. Client tests incur model usage; `npm run check` does not.
 
 ```bash
 # Programmatic checks
@@ -952,18 +1071,21 @@ node harness/run.mjs run --mode registry --scenarios s01,s06
 ```
 
 ```bash
-# Simple: all scenarios, reduced cross-client pairing
-node harness/run.mjs run --mode registry --upgrade --simple
+# Simple: three prompts per client
+node harness/run.mjs run --mode registry --simple
 ```
 
 ```bash
-# Full matrix: all scenarios and ordered pairs, without the required-gate designation
-node harness/run.mjs run --mode registry --upgrade
+# High: previous broad Simple, including upgrades
+node harness/run.mjs run --high
+
+# XHigh: all scenarios, upgrades and ordered pairs
+node harness/run.mjs run --xhigh
 ```
 
 ```bash
 # Required: full selection, including upgrades and native Codex approval
-node harness/run.mjs run --mode registry --upgrade --required
+node harness/run.mjs run --xhigh --required
 ```
 
 ```bash
@@ -982,22 +1104,19 @@ resolution through a loopback Verdaccio registry; it does not publish to public 
 candidate locally, clears resolution caches and verifies upgrade continuity. S9 is blocked
 without registry+upgrade; NanoClaw's legacy S10 case also needs registry mode.
 
-`--required` rejects client/scenario filters and requires registry+upgrade. `--simple` changes
-only S2 pair selection, cannot combine with `--required`, and follows this stable order:
+`--required` rejects client/scenario filters and requires registry+upgrade. Simple runs
+only capture, fresh-session recall and an unrelated question. It cannot combine with
+upgrade or required mode. High and the separate model-check profile run a directed cross-client
+cycle; XHigh checks every ordered pair. Planned links are recorded in `run.crossClientPairs`.
+High and the separate model-check profile follow this cycle:
 
 ```mermaid
 flowchart LR
     O["OpenCode"] --> C["Claude"] --> X["Codex"] --> H["Hermes"] --> N["NanoClaw"] --> O
 ```
 
-With five clients, Simple runs five writer/reader pairs and five new S2 reader prompts; the writer checkpoint comes from S1. Full mode runs
-twenty ordered pairs with five shared writes and twenty reads, twenty-five S2 prompts. The
-twenty-prompt saving applies to S2, not the whole run or bill. In upgrade mode S1 also
-scores the prelude's post-upgrade capture instead of repeating it, Claude's hook-ordering case
-is derived from S1, S4 reuses S1's global write, and in simple mode S3 is scored on the
-prelude's write-then-fresh-recall pair. Simple mode also leaves two required-only checks to `--required` (S4's recall from a directory that never saw the installer, and Codex persisted hook approval) and reuses three more turns: S5 builds on the client's own S2 checkpoint as the stale state, OpenCode's plugin-only case stops at the verified capture, and Hermes' accepted-hooks half is S1's capture. A full upgrade matrix is 107 planned prompts; a Simple run now plans 58 rather than 68 (both include Claude’s cold-home probe), for five clients with upgrades. S1’s hidden-value/literal checkpoint also supplies S2 and S8. Without upgrades, S3 reuses it too. That removes two prompts per client with upgrades, three without, while retaining the capture, literal, own-recall, foreign-recall and freshness assertions. For Claude/Codex/Hermes/NanoClaw, Simple with upgrades plans 47 prompts instead of 55. Blocked prerequisites and client selection can change actual counts. Every reused or trimmed cell says so in its notes. Subsets form a cycle in the same manifest order; S2 needs at least two
-clients. Unavailable clients keep their place in a simple cycle, and affected links are
-BLOCKED. The planned links are recorded in `run.crossClientPairs`.
+Older broad Simple measurements are historical and do not describe the current
+three-prompt profile.
 
 Native Codex hook approval runs automatically when its S10 case is selected. It requires
 Python 3 and Codex 0.150.1 on Linux/macOS. It validates the
@@ -1014,27 +1133,22 @@ to a 300-second timeout. These are waiting bounds, not automatic reruns of faile
 Tune through the documented env template/CLI flags only when investigating measured delays.
 Record the changed configuration and keep the original failed run.
 
-### Configure a run without a new suite format
+### Customize models and test selection
 
-Use the existing flags and model environment variables. A selected set of built-in scenarios
-already serves as a custom suite; a separate JSON/YAML suite loader would add another format
-to maintain without adding coverage. Save a frequently used command in a small shell script
-if needed. New prompts or assertions belong in the versioned scenario drivers described in
-[prompt locations](#where-to-find-and-edit-the-prompts).
+Use `--config` for Simple prompts and pass criteria. For existing scenarios, select clients
+and scenarios with CLI flags. Save a command in a shell script if you use it often.
+New scenario code belongs in the [scenario files](#where-to-find-and-edit-the-prompts).
 
 | Setting | Local CLI | Current GitHub workflow |
 |---|---|---|
-| Suite / coverage | Combine `--clients`, `--scenarios`, `--simple`, and `--upgrade`; `--required` forbids filters and simple mode | `suite`: `smoke`, `simple`, or `required`; choose `required` for the full matrix |
+| Suite / coverage | Choose `--simple`, `--high`, or `--xhigh`; use `--clients` for a subset. Simple uses `--config` for customization; `--required` forbids subsets | `suite`: `smoke`, `simple`, `high`, `xhigh`, or `required`; choose `required` for release verification |
 | Models | Set `MIDBRAIN_HARNESS_<CLIENT>_MODEL` independently for `CLAUDE`, `OPENCODE`, `HERMES`, `NANOCLAW`, and `CODEX` | `anthropic_model`: `claude-haiku-4-5` or `claude-sonnet-5` for all four Anthropic clients; Codex is pinned to `gpt-5.6-sol` |
 | OS | Runs on the actual host; there is no `--os` flag or OS emulation | Behavioral runner is fixed to self-hosted Linux; programmatic CI already tests Linux, macOS and Windows |
-| Custom test suite file | No `--suite-file` or arbitrary scenario-file loader; select existing scenario IDs | No custom client/scenario inputs |
+| Custom prompts | Simple accepts `--config FILE` with prompts and criteria; other profiles use built-in scenarios | No custom prompt inputs |
 
-To test another OS, execute the harness on that OS with its prerequisites. NanoClaw still
-runs in a Linux Docker container. Local recipes target macOS/Linux; Windows behavioral
-support and the Linux workflow have not been established by the recorded validation.
-Changing a runner label alone does not validate a new platform. Keep the existing
-programmatic OS matrix and one behavioral host for now; expand behavioral platforms when
-there is a concrete platform-specific failure or support requirement.
+To test another OS, run the harness on that OS. NanoClaw still uses a Linux container.
+The recorded client runs used macOS; Windows client runs and the Linux workflow still
+need validation. Code tests already run across all three platforms.
 
 ```bash
 # Custom selection: capture, cross-client recall and answer cleanliness in two clients
@@ -1045,7 +1159,7 @@ node harness/run.mjs run --mode registry --clients claude,codex --scenarios s01,
 ```
 
 Use the [model setup recipe](#3-pin-models-and-check-readiness) to pin all five clients before
-a Simple or Full matrix run. OpenCode needs the provider prefix, for example
+a Simple, High or XHigh run. OpenCode needs the provider prefix, for example
 `anthropic/claude-haiku-4-5`; Hermes also has `MIDBRAIN_HARNESS_HERMES_PROVIDER`.
 Model choices change the configuration being validated. Check `run.models` in the resulting
 `results.json`; a pass with one model does not establish a pass with another. There is no
@@ -1068,16 +1182,18 @@ disable it, rather than writing `--simple=false`).
 
 | Run flag | Default | Meaning / constraints |
 |---|---|---|
-| `--clients opencode,claude,codex,hermes,nanoclaw` | All five; Pi opt-in | Select clients by ID (also `pi`); manifest order controls execution and simple-cycle order. Forbidden with `--required`. |
+| `--clients opencode,claude,codex,hermes,nanoclaw` | All five; Pi opt-in | Select clients by ID (also `pi`); manifest order controls execution and directed-cycle order. Forbidden with `--required`. |
 | `--scenarios s01,s06` | All implemented scenarios | Comma-separated short IDs or full scenario IDs. No S7 driver. Forbidden with `--required`. |
 | `--mode dev` or `--mode registry` | `dev` | Direct extracted candidate or loopback npm installation. |
 | `--concurrency N` | Run: 1; model profiles/sweep: 4 | Run limit 1–5; sweep total 1–10, at most 5 per round. Default scenarios require explicit parallel safety. |
-| `--model-checks` | Off | Fixed six-prompt registry profile; infrastructure unverified. Implies simple cycle; incompatible with follow-up, upgrade, required, scenario filters or dev mode. |
+| `--model-checks` | Off | Fixed six-prompt registry profile; infrastructure unverified. Uses a directed cycle; incompatible with follow-up, upgrade, required, scenario filters or dev mode. |
 | `--follow-up RUN` | Off | Same profile with strictly verified prior infrastructure evidence and prepared tool reuse; defaults to baseline clients. |
 | `--models FILE` | Required for sweep | JSON array of uniquely named rounds with explicit client/model mappings. |
 | `--parallel-runs N` | Sweep: 1 | 1–5 active rounds, no greater than the total worker budget. Each round has a fresh home. |
 | `--upgrade` | Off | Previous-release upgrade prelude; requires registry mode. |
-| `--simple` | Off | One directed S2 cycle; other selected checks unchanged. Incompatible with `--required`. |
+| `--simple` | Off | Three prompts per client. Customize with `--config`; incompatible with upgrade/required/scenario flags. |
+| `--high` | Off | Previous broad Simple: all scenarios, upgrades and a directed cross-client cycle; automatically uses registry mode. |
+| `--xhigh` | Off | All scenarios, upgrades and every ordered pair; automatically uses registry mode. Add `--required` for release verification. |
 | `--required` | Off | Full client/scenario selection and all ordered pairs; requires registry+upgrade, forbids filters and simple mode. |
 | `--approve-codex-hooks` | Automatic | Compatibility flag; native approval already runs for the Codex S10 case. Pinned client and Python 3 required. |
 | `--interactive` | Off | Replace automatic native S10 approval with manual terminal approval; requires a TTY. |
@@ -1100,7 +1216,7 @@ unknown option; use the supported names rather than assuming an extra flag took 
 Every completed run and sweep writes **`report.html`** beside its JSON/Markdown results.
 Open the file directly in a browser: styles are embedded and it works offline. It shows
 elapsed time, prompt counts, models, per-client cost accounting and coverage, failed checks and the run
-coverage matrix. Scope remains explicit: a model-check summary is not release sign-off.
+coverage matrix. The report also lists which checks were left out.
 The summary embeds no raw transcripts or credential-bearing homes; full local evidence
 remains in the run directory. For existing results:
 
@@ -1125,29 +1241,20 @@ subprocesses get a 5-second termination grace. A cancelled/incomplete round is n
 pass. Provider work already sent may still be charged. Closing the host abruptly or
 force-killing the supervisor can prevent normal cleanup.
 
-### Start with the verdict and identity
+### Check the result
 
-The run prints the path to `report.md`. Open it, then check:
+Open `report.html` and check:
 
-1. **Identity:** candidate SHA, dirty flag, package version, archive hash, mode and client
-   versions. `results.json` also records model pins in `run.models`. Confirm this is the
-   intended candidate and configuration, not a report from before a fix.
-2. **Completeness and scope:** a finished timestamp and `results.json`, then `run.required`,
-   `run.simple`, `run.modelChecks`, `run.followup` and selected clients/scenarios.
-   Model-check passes do not cover omitted infrastructure. Follow-up checks are prior evidence,
-   not fresh passes. Even a broad run without `--required` is a
-   checkpoint. `results.partial.json` is progress after some scenarios, not completed evidence.
-3. **Isolation:** `results.isolation.ok` must be true, with an empty drift list. The sibling
-   `isolation.json` contains before/after snapshot timestamps and drift, not an `ok` field.
-4. **Matrix:** find the failing row/client, then read every matching entry in **Cell details**.
-   Each matrix square shows the worst status across its underlying cells; one square can
-   include several cross-client readers/writers or client-specific cases.
+1. **Version and models:** was this the code and configuration you intended to test?
+2. **Coverage:** did the run finish, and which profile, clients and scenarios ran? Partial results and reused checks are not fresh, complete results.
+3. **Isolation:** did the user's client configuration stay unchanged? `results.isolation.ok` should be true with no drift.
+4. **Failures:** find the affected client and test, then open its details. A report square shows the worst result among its underlying checks.
 
 | Status | Interpretation |
 |---|---|
 | PASS | Every named check in that cell passed. This does not imply every other cell or suite passed. |
 | FAIL | A check failed, including a scenario error. Inspect evidence before attributing it to the product, client or harness. |
-| BLOCKED | A prerequisite or execution dependency prevented validation; the reason is recorded. This is not a pass. |
+| BLOCKED | The test could not run or be checked. Read the reason; the behavior is still unverified. |
 | SKIP / FLAKY | Supported report statuses, both non-passing for the run gate. There is no automatic flaky-test detection or rerun scheduler. |
 | — | No cell for that row/client in this run; no coverage claim. |
 
@@ -1192,7 +1299,9 @@ console.log(JSON.stringify({
   archiveSha256: r.candidate.tarballSha256,
   dirty: r.candidate.dirty,
   required: r.run.required,
-  simple: r.run.simple ?? false,
+  profile: r.run.profile ?? "legacy",
+  quickSimple: r.run.quickSimple ?? false,
+  reducedPairs: r.run.simple ?? false,
   pairs: r.run.crossClientPairs ?? 'Not recorded by this harness version',
   models: r.run.models,
   clients: r.clients.map(c => ({ id: c.id, version: c.version, runnable: c.runnable })),
@@ -1413,9 +1522,10 @@ The YAML file is the source of truth; there is no second workflow example in thi
   `MIDBRAIN_HARNESS_API_URL` as a variable. Keys enter the relevant steps as environment
   variables; the workflow does not generate `harness/.env`.
 - **Trigger:** manual `workflow_dispatch` only. No push, release or scheduled trigger.
-- **Suites:** smoke runs S1/S6; simple retains all scenarios with one cross-client cycle;
-  required runs the full registry+upgrade matrix. All preserve failing exit codes.
-  Smoke and simple success are not full required sign-off.
+- **Suites:** smoke runs S1/S6; simple runs capture, fresh-session recall and an unrelated question;
+  high adds all scenarios and upgrades with a directed cross-client cycle; xhigh checks
+  every ordered pair. Required runs XHigh coverage with release evidence verification.
+  Only the required suite can establish release sign-off. All preserve failing exit codes.
 
 After the workflow is activated, the operator selects a branch, suite and Anthropic model
 under **Actions → Behavioral tests → Run workflow**. The current workflow then installs
@@ -1573,10 +1683,10 @@ This is a dated checkpoint, not a live status dashboard:
 
 | Area | Implemented | Recorded validation as of 2026-09-10 |
 |---|---|---|
-| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,363 tests passed, 3 skipped, plus 232 copied-topology isolation checks. |
+| Programmatic suite and harness logic | Product tests, scoring/driver checks, isolation, evidence, simple mode and NanoClaw packaging tests | Latest local full check: 1,380 tests passed, 3 skipped, plus 232 copied-topology isolation checks. |
 | Native Codex hook approval | Guarded native UI driver and before/after capture scenario | Fresh run `20260910-130445-1639` passed native before/after approval, self-repair, capture and Codex upgrade checks on macOS. Linux remains unvalidated. |
 | Five-client behavioral matrix | All adapters and scenarios described above | Completed broad run `20260909-083452-4fdd`: 108 PASS, 16 FAIL, 1 BLOCKED, clean isolation on older candidate `6d6fc58`; `required: false`. It predates approval automation and simple mode. |
-| Simple cycle | Pair selection, labels, reports, export/CI support | Run `20260910-082009-e52c`: 33m 52s at concurrency 3, 87 PASS / 7 FAIL, real-home isolation passed. |
+| Historical broad Simple (now High) | Pair selection, labels, reports, export/CI support | Run `20260910-082009-e52c`: 33m 52s at concurrency 3, 87 PASS / 7 FAIL, real-home isolation passed. |
 | Self-contained NanoClaw runtime | Local image preparation, embedded runner/assets/license, manifest and hash verification | Unit-tested; the local build attempt was blocked by an unreachable Docker daemon. No prepared-image behavioral run is validated. |
 | Release evidence | Selected redacted export and strict candidate verification | Export/verifier tests; no complete green required evidence for the intended current candidate. |
 | Pi (harness opt-in; product integration ships) | Native capture extension, MCP bridge, session driver | Fresh run `20260910-132050-ce74`: 10 PASS in 1m 09s, four prompts, native capture and fresh-session recall. Earlier Pi/Claude run `20260910-091950-9fc3`: 20 PASS including two-way recall. Clean isolation. |

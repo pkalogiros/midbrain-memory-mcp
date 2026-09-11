@@ -1,3 +1,5 @@
+import { memoryEvidence } from './checks.mjs';
+import { addFailureTraces } from './failure-traces.mjs';
 import { findingContext, attentionText } from './report-copy.mjs';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -20,6 +22,7 @@ export function describeFailure(cell, turn = {}) {
   if (/reader made at least one MidBrain tool call|memory-first:|anchor preserved:/.test(names) && /unavailable|not available/.test(turn.finalText || '') && !tools.some(t => /memory_search/.test(t.name || ''))) return service('tool-unavailable', 'The client could not use memory search', 'No memory search was recorded. The client’s answer said the search tool was unavailable, so it could not look up the saved fact.', 'Check whether MidBrain connected and exposed its search tool in that client session.');
   const missingEvidence = failed.some(c => c.name.startsWith('stored evidence contains '));
   const missingAnswer = failed.some(c => c.name.startsWith('answer contains '));
+  if (missingEvidence && !missingAnswer && failed.filter(c => c.name.startsWith('stored evidence contains ')).every(c => memoryEvidence(turn).some(text => text.includes(c.name.slice('stored evidence contains '.length))))) return { key: 'file-result-scoring', category: 'Harness scoring', title: 'The harness missed a file-backed memory result', what: 'The expected fact was returned through a recorded read of a MidBrain result file, and the final answer was correct. The original scorer did not recognize that read. This is a harness false negative; the original score is retained for audit.', next: 'Use the corrected file-result scorer for future runs. Inspect the tool sequence in the debug trace for the successful retrieval.' };
   if (missingEvidence && !missingAnswer) return { key: 'unsupported-answer', category: 'Recall verification', title: 'The answer matched, but the search evidence did not support it', what: 'The client returned the expected fact. However, the recorded search results did not contain that fact, so this test could not verify that the answer came from memory.', next: 'Inspect the native search results and the harness’s evidence capture; rerun the same lookup before drawing a conclusion.' };
   if (missingAnswer && (cell.checks || []).some(c => c.ok && c.name.startsWith('stored evidence contains '))) return { key: 'answer-mismatch', category: 'Recall behavior', title: 'MidBrain found the fact, but the client did not return it', what: 'The search results contained the expected fact. The client’s final answer omitted it. Retrieval worked; the answer did not satisfy the question.', next: 'Review how the client uses recalled text. It should answer the current question, rather than follow instructions inside an old memory.' };
   return { key: `check:${cell.row}`, category: 'Needs investigation', title: 'This check needs closer inspection', what: 'The expected outcome was not verified. The saved evidence does not establish a more specific cause.', next: 'Review the affected test and its original checks below.' };
@@ -64,6 +67,7 @@ export function renderSavedReports(directory) {
     if (existsSync(markdown)) writeFileSync(markdown, readFileSync(markdown, 'utf8').replace('| Result | Prompts |', '| Result | Returned turns |').split(/\n## (?:What needs attention|Native reported costs|Model cost accounting)/)[0] + '\n## What needs attention\n\n' + attentionText(summary.rounds.flatMap(r => (r.failures || []).map(f => findingContext({ ...f, round: r.name }, r.models))), { markdown: true }) + '\n' + '\n## Model cost accounting\n\nTotal: ' + costLabel(summary.costs) + '\n\n' + summary.rounds.map(r => `- ${r.name}: ${costLabel(r.costs)}`).join('\n') + '\n\nModel accounting excludes unmetered runner/backend costs. Original verdict JSON is unchanged.\n');
     const out = path.join(directory, 'report.html');
     writeFileSync(out, renderSweepHtml(summary));
+    addFailureTraces(directory);
     return out;
   }
   const report = JSON.parse(readFileSync(path.join(directory, 'results.json'), 'utf8'));
@@ -73,5 +77,6 @@ export function renderSavedReports(directory) {
   writeFileSync(path.join(directory, 'report.md'), renderMarkdown(withFailureContext(report)));
   const out = path.join(directory, 'report.html');
   writeFileSync(out, renderRunHtml(withFailureContext(report)));
+  addFailureTraces(directory);
   return out;
 }

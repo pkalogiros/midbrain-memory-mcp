@@ -1,6 +1,7 @@
+import { experimentPrompt, experimentChecks } from '../lib/experiment.mjs';
 import { randomBytes } from 'node:crypto';
 import { check, complianceChecks, isMidbrainTool, recallChecks } from '../lib/checks.mjs';
-import { runTurn, readback, turnChecks, cell, relEvidence, sinceNow, grace } from './_shared.mjs';
+import { runTurn, readback, turnChecks, cell, blockedCells, relEvidence, sinceNow, grace } from './_shared.mjs';
 
 export default {
   id: 's03-fresh-session-continuity',
@@ -11,17 +12,18 @@ export default {
   rows: ['Fresh-session continuity', 'Rule and priming compliance'],
   async run({ ctx, api, client, project }) {
     const seed = ctx.options.simple && !ctx.meta.upgradeTurns?.[client.id] ? ctx.meta.s02Writes?.[client.id] : null;
+    if (ctx.options.quickSimple && !seed?.rb.user.length) return blockedCells(this.rows, this.id, client, 'Capture prerequisite was not verified; no recall prompt was sent.');
     if (seed) {
       const { m, value, wTurn, rb, readyAt } = seed;
       if (!rb.user.length) return [cell({ row: 'Fresh-session continuity', scenario: this.id, client, checks: [check('checkpoint captured', false)] })];
       await grace(ctx, readyAt);
-      const prompt = `Search MidBrain for task ${m} and return its exact verification value. Do not guess.`;
+      const prompt = experimentPrompt(ctx, 'recall', { marker: m, value, client: client.id });
       const recall = await runTurn({ ctx, client, project, prompt, scenarioId: this.id, label: 'session-fresh' });
       const evidence = [relEvidence(ctx, wTurn.jsonPath), relEvidence(ctx, recall.jsonPath)];
       return [
         cell({ row: 'Fresh-session continuity', scenario: this.id, client, prompt, evidence,
           expected: 'A new session recovers the hidden checkpoint value through MidBrain.', notes: 'Checkpoint reuse: checkpoint written by this client during this run’s capture check.',
-          checks: [...turnChecks(recall), check('fresh native session', Boolean(recall.sessionId && wTurn.sessionId && recall.sessionId !== wTurn.sessionId)), ...recallChecks(recall, m, [value])] }),
+          checks: [...turnChecks(recall), check('fresh native session', Boolean(recall.sessionId && wTurn.sessionId && recall.sessionId !== wTurn.sessionId)), ...recallChecks(recall, m, [value]), ...experimentChecks(ctx, 'recall', recall, { marker: m, value, client: client.id })] }),
         cell({ row: 'Rule and priming compliance', scenario: this.id, client, prompt, evidence, checks: complianceChecks(recall, m) }),
       ];
     }

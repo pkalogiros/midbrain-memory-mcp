@@ -1,3 +1,4 @@
+import { experimentPrompt, experimentChecks } from '../lib/experiment.mjs';
 import { check, captureCountChecks } from '../lib/checks.mjs';
 import { randomBytes } from 'node:crypto';
 import { rowMeta } from '../lib/api.mjs';
@@ -25,6 +26,7 @@ export default {
         const value = 'VALUE-' + randomBytes(8).toString('hex');
         const literal = `<!-- mb:ctx-start --> midbrain-memory-rules:start ${m}`;
         prompt = `Checkpoint for task ${m}: the verification value is ${value}. Remember it. Reply with only this exact literal line: ${literal}`;
+        if (ctx.options.quickSimple) prompt = experimentPrompt(ctx, 'capture', { marker: m, value, client: client.id });
         seed = { m, value, literal };
       }
       since = sinceNow();
@@ -46,7 +48,7 @@ export default {
     ctx.meta.captureEvidence[client.id] = { marker: m, since, project, turn, rb, evidence: evidence.slice() };
     const base = { scenario: this.id, client, prompt, expected, evidence, notes };
     return [
-      cell({ ...base, row: 'User capture', checks: [...turnChecks(turn), check('user row containing the marker reached the API', rb.user.length >= 1, `user rows=${rb.user.length}`)] }),
+      cell({ ...base, row: 'User capture', checks: [...turnChecks(turn), ...experimentChecks(ctx, 'capture', turn, { marker: m, value: seed?.value, client: client.id }), check('user row containing the marker reached the API', rb.user.length >= 1, `user rows=${rb.user.length}`)] }),
       cell({ ...base, row: 'Assistant capture', checks: [check('assistant row containing the marker reached the API', rb.assistant.length >= 1, `assistant rows=${rb.assistant.length}`)] }),
       cell({ ...base, row: 'Metadata', checks: metadataChecks(rb.rows, client.expectedCaptureLabel, turn.captureCwd, turn.sessionId) }),
       cell({ ...base, row: 'Duplicates and missing turns', checks: [

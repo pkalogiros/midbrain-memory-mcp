@@ -118,12 +118,12 @@ export function memoryEvidence(turn) {
       const text = resultText(call);
       if (/^Memory search failed:|^Error:.*(?:401|403|Connection closed)/i.test(text)) continue;
       results.push(text);
-      const file = text.match(/Output has been saved to (\/[^\s]+)\.\n/);
+      const file = text.match(/Output has been saved to (\/[^\r\n]+)\.\r?\n/);
       if (file) files.add(file[1]);
     } else if (call.name === 'Bash' && call.ok === true) {
       const command = call.input?.command || '';
-      const read = command.match(/^grep -n "[A-Za-z0-9_-]+" (\/[^\s;|&<>`$]+)$/);
-      if (read && files.has(read[1])) results.push(resultText(call));
+      const read = command.match(/^grep -n "[A-Za-z0-9_-]+" (?:"(\/[^"\\\r\n`$]+)"|'(\/[^'\r\n]+)'|(\/[^\s;|&<>`$]+))$/);
+      if (read && files.has(read[1] || read[2] || read[3])) results.push(resultText(call));
     }
   }
   return results;

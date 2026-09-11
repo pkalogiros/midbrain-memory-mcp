@@ -6,7 +6,7 @@ import { exportBundle, verifyBundle } from './release-evidence.mjs';
 import { collectSecrets } from '../lib/env.mjs';
 
 export function collectCiEvidence({ root, output, sha, suite, secrets = [] }) {
-  if (!/^[a-f0-9]{40}$/.test(sha) || !['smoke', 'simple', 'required'].includes(suite)) throw new Error('Invalid CI source SHA or suite');
+  if (!/^[a-f0-9]{40}$/.test(sha) || !['smoke', 'simple', 'high', 'xhigh', 'required'].includes(suite)) throw new Error('Invalid CI source SHA or suite');
   fs.mkdirSync(output, { recursive: true });
   const summary = [`# Behavioral ${suite} run`, '', `Source: \`${sha}\``, ''];
   let verified = false;
