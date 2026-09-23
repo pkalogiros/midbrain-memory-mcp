@@ -148,7 +148,7 @@ it.skipIf(Number(process.versions.node.split('.')[0]) < 24)('round-trips mailbox
   const { createMailbox, enqueue, readMailbox } = await import('../harness/lib/nanoclaw-mailbox.mjs');
   const root = mkdtempSync(path.join(os.tmpdir(), 'nano-mailbox-'));
   try {
-    const source = new URL('./fixtures/nanoclaw/', import.meta.url).pathname;
+    const source = fileURLToPath(new URL('./fixtures/nanoclaw/', import.meta.url));
     await createMailbox(root, source, 'session');
     await enqueue(root, 'first', 'session', 'before restart');
     await enqueue(root, 'second', 'session', 'after restart');

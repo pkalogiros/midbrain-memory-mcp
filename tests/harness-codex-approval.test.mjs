@@ -6,12 +6,12 @@ import path from 'node:path';
 import { createRunContext, childEnv } from '../harness/lib/context.mjs';
 import scenario from '../harness/scenarios/s10-client-specific.mjs';
 
-const home = '/isolated/home', project = `${home}/work/test`;
+const home = path.resolve('/isolated/home'), project = path.join(home, 'work/test');
 function inventory(trustStatus = 'untrusted') {
   return { data: [{ cwd: project, errors: [], warnings: [], hooks: Object.entries({
     postToolUse: 'tool', userPromptSubmit: 'user', stop: 'assistant',
-  }).map(([eventName, role]) => ({ eventName, command: `'${home}/.midbrain/bin/codex-hook' ${role}`,
-    handlerType: 'command', sourcePath: `${home}/.codex/hooks.json`, source: 'user',
+  }).map(([eventName, role]) => ({ eventName, command: `'${path.join(home, '.midbrain/bin/codex-hook')}' ${role}`,
+    handlerType: 'command', sourcePath: path.join(home, '.codex/hooks.json'), source: 'user',
     enabled: true, isManaged: false, async: false, matcher: null, timeoutSec: 10,
     key: eventName, currentHash: `sha256:${role}`, trustStatus,
   })) }] };
@@ -74,7 +74,7 @@ it.each(['passing', 'capture before approval', 'missing capture afterward', 'app
     } };
     const [cell] = await scenario.run({ ctx, client, api, project: cwd });
     expect(cell.status).toBe(condition === 'passing' ? 'PASS' : 'FAIL');
-    expect(cell.evidence.some(file => file.endsWith('/approval-ui.txt'))).toBe(true);
+    expect(cell.evidence.some(file => path.basename(file) === 'approval-ui.txt')).toBe(true);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

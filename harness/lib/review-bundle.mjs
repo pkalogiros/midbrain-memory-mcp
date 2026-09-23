@@ -131,9 +131,14 @@ export function exportReviewBundle(runDirectories, output) {
     for (const [name, file] of files) { const target = path.join(stage, name); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, file.bytes, { mode: 0o600 }); }
     fs.writeFileSync(path.join(stage, 'manifest.json'), encode(manifest), { mode: 0o600 });
     const verified = verifyReviewBundle(stage); if (!verified.ok) throw new Error(`Review verification failed: ${verified.problems.join('; ')}`);
-    fs.mkdirSync(dest); reserved = true; fs.renameSync(stage, dest); reserved = false;
+    // Reserve exclusively, then move children: Windows cannot rename over an
+    // existing directory. Publish the manifest last so partial output cannot verify.
+    fs.mkdirSync(dest); reserved = true;
+    for (const name of fs.readdirSync(stage).filter(name => name !== 'manifest.json')) fs.renameSync(path.join(stage, name), path.join(dest, name));
+    fs.renameSync(path.join(stage, 'manifest.json'), path.join(dest, 'manifest.json'));
+    reserved = false;
     return { directory: dest, index: path.join(dest, 'index.html'), runs, files: files.size };
-  } finally { fs.rmSync(stage, { recursive: true, force: true }); if (reserved) fs.rmdirSync(dest); }
+  } finally { fs.rmSync(stage, { recursive: true, force: true }); if (reserved) fs.rmSync(dest, { recursive: true, force: true }); }
 }
 
 export function verifyReviewBundle(directory) {

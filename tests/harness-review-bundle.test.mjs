@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,6 +19,30 @@ function fixture(fn) {
 }
 
 describe('offline MCP review bundles', () => {
+  it('publishes without replacing directories and writes the manifest last', () => fixture(({ source, dest }) => {
+    const rename = fs.renameSync.bind(fs); const targets = [];
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (fs.existsSync(to)) throw Object.assign(new Error('Windows cannot replace a directory'), { code: 'EPERM' });
+      targets.push(path.basename(to)); return rename(from, to);
+    });
+    try {
+      exportReviewBundle([source], dest);
+      expect(targets.at(-1)).toBe('manifest.json');
+      expect(verifyReviewBundle(dest).ok).toBe(true);
+    } finally { spy.mockRestore(); }
+  }));
+  it('removes only its newly reserved output on a partial publication failure', () => fixture(({ source, dest }) => {
+    const rename = fs.renameSync.bind(fs); let calls = 0;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (++calls === 2) throw new Error('controlled move failure');
+      return rename(from, to);
+    });
+    try {
+      expect(() => exportReviewBundle([source], dest)).toThrow('controlled move failure');
+      expect(fs.existsSync(dest)).toBe(false);
+      expect(fs.existsSync(path.join(source, 'results.json'))).toBe(true);
+    } finally { spy.mockRestore(); }
+  }));
   it('redacts credential fields in native Hermes JSONL while preserving schemas', () => fixture(({ source, dest }) => {
     const file = 'evidence/hermes/scripted-smoke/native-session.jsonl';
     fs.mkdirSync(path.dirname(path.join(source, file)), { recursive: true });
