@@ -110,7 +110,7 @@ commands, evidence boundaries, failure handling and recorded validation.
 ## Recommended release layers
 
 1. Run `npm run check` on each change for deterministic regressions, error envelopes and isolation rules.
-2. Run native dry-smoke and scripted-smoke on MCP/installer/client integration changes. The `MCP integration (no models)` workflow is configured for Linux/macOS, with reports retained even on failure. [All eight native jobs passed on Linux/macOS](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`.
+2. Run native dry-smoke and scripted-smoke on MCP/installer/client integration changes. The `MCP integration (no models)` workflow is configured for Linux/macOS, with reports retained even on failure. [All twelve native jobs passed on Linux/macOS](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35875387911) for commit `6c29a38`.
 3. Before release, run a small explicitly approved live-smoke configuration to check the real-model boundary. Inspect native usage and accounting gaps; call/time limits are not a dollar budget.
 4. Run the full behavioral suite when capture, retrieval or memory behavior changes.
 
@@ -125,7 +125,7 @@ native Windows validation, cancellation and timed-out
 request recovery, and interrupted account transactions across process restarts.
 These gaps remain visible rather than counting as passing coverage.
 
-[Standard CI passed on Linux, macOS and Windows](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643297) for the same commit. These are programmatic tests; native Windows client smoke remains unvalidated.
+[Standard CI passed on Linux, macOS and Windows](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35875387757) for the same commit. These are programmatic tests; native Windows client smoke remains unvalidated.
 
 ## Hand over MCP review evidence
 

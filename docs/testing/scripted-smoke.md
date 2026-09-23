@@ -120,7 +120,7 @@ These macOS arm64 runs used the packaged candidate and installed native clients,
 | Claude Code 2.1.280 | `20260923-073232-875d` | 26/26 | 14 | 15 completion requests + 1 startup HEAD |
 | Codex 0.150.1 | `20260923-073231-c802` | 26/26 | 14 | 15 completion requests |
 
-The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes/Claude/Codex × Linux/macOS on relevant pushes and pull requests, or manual dispatch. [Remote CI passed all eight Linux/macOS native jobs](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`, including scripted Pi, OpenCode and Hermes on each host. The new Claude/Codex jobs await their first remote validation. Native Windows execution remains unvalidated.
+The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes/Claude/Codex × Linux/macOS on relevant pushes and pull requests, or manual dispatch. [Remote CI passed all twelve Linux/macOS native jobs](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35875387911) for commit `6c29a38`, including all five scripted clients on each host. The downloaded reports passed review-bundle verification: 12 runs, 1,026 assertions and 248 files. Native Windows execution remains unvalidated.
 
 Hermes uses its custom-provider setting with a loopback URL, automatic compression disabled and the full tool catalog enabled (`tool_search: off`). Its native session export proves dispatch independently of provider receipts. This does not test Hermes deferred tool discovery. Only OpenCode currently runs the second-server collision scenario.
 
