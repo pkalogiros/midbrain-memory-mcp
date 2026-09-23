@@ -1,15 +1,27 @@
 # Multi-client behavioral harness
 
-**Run this** from the repository root, after [one-time setup](../docs/testing/harness-how-it-works.md#local-setup):
+**For MCP integration testing, start here** from the repository root after `npm ci`:
+
+```bash
+# All five clients: MCP contracts and native discovery, no models.
+node harness/run.mjs dry-smoke --install-clients
+# Real Pi tool dispatch and returned provider context, no LLM inference.
+node harness/run.mjs scripted-smoke --clients pi --install-clients
+```
+
+Claude and Codex must already be installed; Hermes installation needs `uv`.
+Both commands print an offline `report.html` path and exit nonzero on incomplete,
+blocked or failed coverage. Neither needs model or MidBrain credentials.
+
+For a few real-model tool checks, use `live-smoke` with explicit models and
+`--execute`. For memory behavior, use the existing behavioral suite:
 
 ```bash
 node harness/run.mjs run --simple --mode registry --clients claude,codex,hermes,nanoclaw --concurrency 4
 ```
 
-Runs three prompts each in Claude, Codex, Hermes and NanoClaw. Progress appears in the
-terminal. When it finishes, open the printed `report.html` path. Press Ctrl+C to stop.
-
-For more coverage, replace `--simple` with `--high` or `--xhigh`.
+That behavioral command sends three real-model prompts per client. Use `--high`
+or `--xhigh` for broader behavioral coverage. Press Ctrl+C to stop any run.
 
 ---
 
@@ -51,6 +63,119 @@ Both used four prompts and left real homes unchanged. The separate Claude/Codex/
 Hermes upgrade refresh passed current-candidate capture for all three; its two
 remaining failures were previous-release Claude capture and a local API 401 during
 Hermes accepted-hook capture. These are targeted checks, not a full release gate.
+
+## Dry-smoke: test the MCP without models
+
+```bash
+node harness/run.mjs dry-smoke --install-clients
+```
+
+This mode uses the existing candidate, installer, isolated homes and reports. It
+calls all 12 MCP tools against a local synthetic API and separately checks native
+connection/discovery in OpenCode, Claude, Codex, Hermes and Pi. It sends no model
+prompts and needs no API keys or Docker. Claude/Codex must be on PATH; missing
+OpenCode/Hermes/Pi can be installed run-locally (`uv` is needed for Hermes).
+
+Failures include invalid arguments, unavailable/malformed API responses,
+missing/empty credentials and corrupt account state, followed by recovery checks, concurrent calls and fresh-process restart.
+Missing clients and unsupported probes are **BLOCKED**, and **FAIL, BLOCKED or
+incomplete coverage all exit nonzero**. Direct tool execution and native discovery
+are reported separately; memory quality and model behavior remain untested.
+The report includes an MCP context preview with tool schemas, arguments, results
+and errors. JSON, Markdown and incremental event logs are saved per client; no
+native model request is constructed.
+The preview separates arguments and responses, labels scenario verdicts, and
+supports searching, filtering and links to individual exchanges. Damaged or
+inconsistent event logs are retained as incomplete evidence and fail validation.
+The HTML and Markdown reports also show per-tool discovery, schema, positive, invalid-input and recovery coverage. Recovery gaps are labelled NOT COVERED.
+See [dry-smoke coverage, failure handling and OS limits](../docs/testing/dry-smoke.md) for the exact checks.
+
+## Scripted-smoke: native tool dispatch without LLM inference
+
+```bash
+node harness/run.mjs scripted-smoke --clients pi --install-clients
+```
+
+This mode launches **real Pi, OpenCode or Hermes** with the installed MCP and a local scripted provider.
+Select one per run with `--clients pi`, `--clients opencode` or `--clients hermes`.
+The script requests every one of the 12 tools, then injects a backend 503 and asks
+for a successful follow-up. It advances only when the native client returns the correlated result.
+Native events, MCP arguments/results and fixture HTTP receipts must agree. One
+Pi or Hermes session is capped at 14 tool calls and 15 local completion requests. OpenCode
+also calls a second MCP server exposing its own `memory_search`: 15 tool calls
+and 16 local completion requests. Hermes also permits at most 16 local capability-discovery GETs, logged separately. All sessions have a 90-second deadline. The peer query
+must reach the independent server and must never reach MidBrain.
+
+The report includes **actual request bodies sent by the client to the local provider**:
+tool definitions, conversation messages, arguments and returned results, with
+synthetic credentials redacted. Provider requests and MCP events are also logged
+incrementally. This adds native dispatch evidence beyond dry-smoke's direct probes;
+it makes zero LLM calls and does not assess model decisions or memory quality.
+
+The supported adapters are Pi, OpenCode and Hermes. Other clients and combined selections
+are rejected explicitly. A missing native client is BLOCKED; failed or incomplete evidence exits nonzero. No real-provider
+fallback is configured. See [the scripted-smoke reference](../docs/testing/scripted-smoke.md) for
+commands, evidence boundaries, failure handling and recorded validation.
+
+
+## Recommended release layers
+
+1. Run `npm run check` on each change for deterministic regressions, error envelopes and isolation rules.
+2. Run native dry-smoke and scripted-smoke on MCP/installer/client integration changes. The `MCP integration (no models)` workflow is configured for Linux/macOS, with reports retained even on failure; remote results must still be recorded.
+3. Before release, run a small explicitly approved live-smoke configuration to check the real-model boundary. Inspect native usage and accounting gaps; call/time limits are not a dollar budget.
+4. Run the full behavioral suite when capture, retrieval or memory behavior changes.
+
+Current local evidence covers all five dry-smoke clients and native scripted Pi,
+OpenCode and Hermes on macOS arm64. Operational failures carry `isError: true`;
+empty successes remain successful. Account creation now rolls back a created agent
+when key minting fails, and reports the orphan ID if cleanup fails. Tests exercise
+both cleanup outcomes, credential preservation and subsequent recovery.
+
+Remaining gaps include recorded remote Linux/macOS CI, a paid live-smoke result,
+native Windows validation, scripted Claude/Codex adapters, cancellation and timed-out
+request recovery, and interrupted account transactions across process restarts.
+These gaps remain visible rather than counting as passing coverage.
+
+## Hand over MCP review evidence
+
+```bash
+node harness/run.mjs review-bundle /path/to/dry-run /path/to/pi-run /path/to/opencode-run --output /path/to/new-review
+node harness/run.mjs verify-review /path/to/new-review
+```
+
+Open the exported `index.html` for a comparison of recorded runs and links to their
+reports. Export selects synthetic evidence, redacts fixture credentials, excludes
+private homes/configuration, and generates a SHA-256 manifest. Source runs stay
+unchanged. Missing evidence or unsafe paths fail export. Verification detects
+changed, missing or unlisted files; it verifies bundle integrity, not test success
+or authorship. Failed and interrupted runs retain their status. This is review
+evidence, not release sign-off. See [review export and verification](../docs/testing/mcp-review-bundles.md).
+
+## Live-smoke: a small real-model tool check
+
+```bash
+# Plan only: no credentials loaded and no model calls.
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude
+# Explicit execution: two bounded native sessions against a synthetic API.
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude --execute
+```
+
+This mode checks **Call and consume** and **Error and recovery**, using the real
+client launcher and installed MCP. Native calls, recorded MCP exchanges, fixture
+HTTP requests and fresh verification values in the answer must agree. It tests
+explicit tool execution, not memory quality. Provider credentials are required;
+a MidBrain deployment/key and Docker are not.
+
+Models are explicit per client. The example uses the existing harness's Haiku IDs
+for four Anthropic paths; add an accessible Codex model to include Codex. The default
+90-second worker deadline and four-call MCP cap bound each session, including
+reconnects. They are not dollar/token caps. No harness retries or model escalation
+occur, and a failed first scenario prevents that client's second paid scenario.
+Reports include native/MCP receipts and partial usage/cost coverage. Model-backed
+compatibility has not yet been validated; the automated runner test uses a
+simulated native client without provider calls.
+
+See [live-smoke setup, scoring, limits and evidence](../docs/testing/live-smoke.md).
 
 ## Quick start
 

@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Simple, High, XHigh, smoke, or required release validation'
+        description: 'Dry/scripted smoke (no models), or behavioral validation'
         type: choice
-        options: [smoke, simple, high, xhigh, required]
+        options: [dry-smoke, scripted-smoke, smoke, simple, high, xhigh, required]
         default: smoke
       anthropic_model:
         description: 'Anthropic model used by Claude, OpenCode, Hermes and NanoClaw'
@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   behavioral:
+    if: inputs.suite != 'dry-smoke' && inputs.suite != 'scripted-smoke'
     runs-on: [self-hosted, linux, midbrain-behavioral]
     environment: behavioral-testing
     timeout-minutes: 240
@@ -165,3 +166,15 @@ jobs:
               while IFS= read -r container; do docker rm -f "$container"; done <<< "$containers"
             fi
           done
+
+  scripted-smoke:
+    if: inputs.suite == 'scripted-smoke'
+    uses: ./.github/workflows/mcp-integration.yml
+    with:
+      suite: scripted-smoke
+
+  dry-smoke:
+    if: inputs.suite == 'dry-smoke'
+    uses: ./.github/workflows/mcp-integration.yml
+    with:
+      suite: dry-smoke

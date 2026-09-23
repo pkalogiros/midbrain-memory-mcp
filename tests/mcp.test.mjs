@@ -2512,6 +2512,22 @@ describe("account management tools", () => {
     expect(ks.default_agent_id).toBeUndefined();
   });
 
+  it.each([true, false])("create_agent cleans up after key mint failure (rollback succeeds: %s)", async rollbackSucceeds => {
+    mockAccountFetch(async (url, opts) => {
+      if (url.endsWith('/account/agents') && opts.method === 'POST') return jsonResponse({ agent_id: 'agent_mint_failed', name: 'New' }, 201);
+      if (url.endsWith('/account/keys')) return jsonResponse({ detail: 'mint unavailable' }, 503);
+      if (url.endsWith('/account/agents/agent_mint_failed') && opts.method === 'DELETE') return jsonResponse(null, rollbackSucceeds ? 200 : 503);
+      throw new Error('Unexpected fixture request');
+    });
+    const result = await acClient.callTool({ name: 'create_agent', arguments: { name: 'New' } });
+    expect(result.isError).toBe(true);
+    expect(acFetchSpy.mock.calls.filter(([url, opts]) => String(url).endsWith('/agents/agent_mint_failed') && opts.method === 'DELETE')).toHaveLength(1);
+    expect(result.content[0].text).toMatch(rollbackSucceeds ? /rolled back/ : /rollback also failed/);
+    if (!rollbackSucceeds) expect(result.content[0].text).toContain('agent_mint_failed');
+    expect(result.content[0].text).not.toContain('sk-user-test');
+    expect(fs.existsSync(keystoreFile())).toBe(false);
+  });
+
   it("create_agent preflights the keystore and never mints when it is corrupt", async () => {
     // Seed a corrupt keystore so the preflight read throws BEFORE any network
     // call — proving no agent/key is minted (and thus never orphaned).
@@ -2552,6 +2568,7 @@ describe("account management tools", () => {
     seedSymlinkedKeystoreAndMint(() => ({ ok: true, status: 204, text: async () => "", json: async () => null }));
 
     const res = await acClient.callTool({ name: "create_agent", arguments: { name: "New" } });
+    expect(res.isError).toBe(true);
     const text = res.content[0].text;
     // The compensating DELETE was issued for the minted agent.
     const deleteCall = acFetchSpy.mock.calls.find(([u, o]) => String(u).includes("/agents/agent_orphan") && o.method === "DELETE");
@@ -2567,6 +2584,7 @@ describe("account management tools", () => {
     seedSymlinkedKeystoreAndMint(() => ({ ok: false, status: 500, text: async () => "boom", json: async () => null }));
 
     const res = await acClient.callTool({ name: "create_agent", arguments: { name: "New" } });
+    expect(res.isError).toBe(true);
     const text = res.content[0].text;
     expect(text).toContain("agent_orphan");          // names the orphan for manual cleanup
     expect(text).toMatch(/rollback also failed/i);
@@ -2589,6 +2607,7 @@ describe("account management tools", () => {
       await acClient.callTool({ name: "set_agent", arguments: { agent: "work", project_dir: projectDir } });
       // Switching to a DIFFERENT agent without replace must be refused.
       const refused = await acClient.callTool({ name: "set_agent", arguments: { agent: "personal", project_dir: projectDir } });
+      expect(refused.isError).toBe(true);
       expect(refused.content[0].text).toMatch(/replace: true/i);
       // Existing key unchanged after refusal.
       let projKey = fs.readFileSync(path.join(projectDir, ".midbrain", ".midbrain-key"), "utf8").trim();

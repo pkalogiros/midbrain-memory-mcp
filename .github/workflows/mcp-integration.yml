@@ -1,0 +1,156 @@
+# Native MCP integration only. No provider credentials or paid model calls.
+name: MCP integration (no models)
+on:
+  pull_request:
+    paths: &a1
+      - mcp.mjs
+      - index.js
+      - install.mjs
+      - package.json
+      - package-lock.json
+      - shared/**
+      - plugins/**
+      - harness/**
+      - tests/**
+      - .github/workflows/mcp-integration.yml
+  push:
+    paths: *a1
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        options:
+          - all
+          - dry-smoke
+          - scripted-smoke
+        default: all
+        description: Zero-model native integration suite
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: all
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: mcp-integration-${{ github.workflow }}-${{ github.ref }}-${{ inputs.suite || 'all' }}
+  cancel-in-progress: true
+jobs:
+  dry-smoke:
+    if: inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'dry-smoke'
+    name: dry-smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      MIDBRAIN_HARNESS_OPENCODE_VERSION: 1.18.32
+      MIDBRAIN_HARNESS_HERMES_VERSION: 0.19.0
+      MIDBRAIN_HARNESS_PI_VERSION: 0.87.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.3.0
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies and native clients
+        run: |
+          npm ci
+          python -m pip install uv
+          npm install --prefix "$RUNNER_TEMP/dry-smoke-clients" --no-audit --no-fund --no-save \
+            @anthropic-ai/claude-code@2.1.280 @openai/codex@0.150.1
+          echo "$RUNNER_TEMP/dry-smoke-clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Run MCP dry-smoke without provider credentials
+        run: node harness/run.mjs dry-smoke --install-clients --root "$RUNNER_TEMP/midbrain-dry-smoke"
+      - name: Preserve reports and selected synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-smoke-${{ matrix.os }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/report.html
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/report.md
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/results.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/junit.xml
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/candidate.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/isolation.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/mcp-probe.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/native-probe.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/mcp-context-preview.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/mcp-context-preview.md
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/mcp-events.ndjson
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/fixture-requests.json
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/_install/*.txt
+            ${{ runner.temp }}/midbrain-dry-smoke/runs/*/evidence/*/dry-smoke/protocol-events.ndjson
+  scripted-smoke:
+    if: inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'scripted-smoke'
+    name: scripted-smoke ${{ matrix.client }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        client:
+          - pi
+          - opencode
+          - hermes
+    env:
+      MIDBRAIN_HARNESS_PI_VERSION: 0.87.1
+      MIDBRAIN_HARNESS_OPENCODE_VERSION: 1.18.32
+      MIDBRAIN_HARNESS_HERMES_VERSION: 0.19.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.3.0
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: matrix.client == 'hermes'
+        with:
+          python-version: "3.12"
+      - run: python -m pip install uv
+        if: matrix.client == 'hermes'
+      - run: npm ci
+      - name: Native client with local scripted provider and synthetic backend
+        run: node harness/run.mjs scripted-smoke --clients ${{ matrix.client }} --install-clients --root "$RUNNER_TEMP/midbrain-scripted-smoke"
+      - name: Preserve reports and redacted synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scripted-smoke-${{ matrix.client }}-${{ matrix.os }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/report.html
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/report.md
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/results.json
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/junit.xml
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/candidate.json
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/isolation.json
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/receipt.json
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/provider-events.ndjson
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/native-session.jsonl
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/native.ndjson
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/mcp-events/*.ndjson
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/${{ matrix.client }}/scripted-smoke/peer-events.ndjson
+            ${{ runner.temp }}/midbrain-scripted-smoke/runs/*/evidence/_install/*.txt

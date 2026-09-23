@@ -1,7 +1,12 @@
 import { runOutcome } from './checks.mjs';
+import { renderLiveSmokeMarkdown } from './live-smoke-report.mjs';
+import { reportToolCoverage } from './tool-contracts.mjs';
+import { renderScriptedMarkdown } from './scripted-smoke-report.mjs';
 import { attentionText, findingContext, failedCheckText } from './report-copy.mjs';
 // Side-by-side report (design doc "Suggested report shape") + JSON results.
+import { smokeReportSummary } from './dry-smoke-report.mjs';
 import { costLabel } from './costs.mjs';
+import { DRY_SMOKE_ROWS, DRY_SMOKE_SCOPE, drySmokeOutcome } from './dry-smoke-policy.mjs';
 export const ROWS = [
   'Clean install',
   'Reproducibility',
@@ -28,9 +33,9 @@ export function worst(statuses) {
   return statuses.reduce((w, s) => ((RANK[s] ?? 0) > (RANK[w] ?? 0) ? s : w), statuses[0] || null);
 }
 
-export function buildMatrix(cells, clientIds) {
+export function buildMatrix(cells, clientIds, rows = ROWS) {
   const m = {};
-  for (const row of ROWS) {
+  for (const row of rows) {
     m[row] = {};
     for (const c of clientIds) {
       const mine = cells.filter((x) => x.row === row && x.client === c);
@@ -45,16 +50,24 @@ function esc(s) {
 }
 
 export function renderMarkdown(results) {
+  if (results.run.kind === 'scripted-smoke') return renderScriptedMarkdown(results);
+  if (results.run.kind === 'live-smoke') return renderLiveSmokeMarkdown(results);
   const { run, candidate, clients, cells, isolation } = results;
+  const dry = run.kind === 'dry-smoke';
+  const rows = dry ? DRY_SMOKE_ROWS : ROWS;
   const ids = clients.map((c) => c.id);
-  const matrix = buildMatrix(cells, ids);
+  const matrix = buildMatrix(cells, ids, rows);
   const lines = [];
-  lines.push(`# MidBrain multi-client parity report — run ${run.runId}`);
+  lines.push(`# MidBrain ${dry ? 'dry-smoke integration' : 'multi-client parity'} report — run ${run.runId}`);
   lines.push('');
-  lines.push(`Result: **${run.finishedAt ? runOutcome(cells, isolation.ok) : 'INCOMPLETE'}**. BLOCKED means incomplete coverage and does not itself fail the run.`, '');
+  lines.push(dry ? `Result: **${drySmokeOutcome(cells, isolation.ok, run.complete, ids)}**. FAIL, BLOCKED or incomplete coverage exits nonzero.\n\n${DRY_SMOKE_SCOPE}` : `Result: **${run.finishedAt ? runOutcome(cells, isolation.ok) : 'INCOMPLETE'}**. BLOCKED means incomplete coverage and does not itself fail the run.`, '');
+  if (dry) {
+    const summary = smokeReportSummary(results);
+    lines.push(`Assertions: **${summary.passed}/${summary.assertions} passed** · ${summary.blocked} blocked cells · ${summary.missing.length} missing coverage cells · Elapsed: ${summary.elapsed}`, '');
+  }
   lines.push('| Field | Value |');
   lines.push('|---|---|');
-  lines.push(`| Run type | ${run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.profile === 'high' ? 'High — broad coverage with one cross-client cycle' : run.profile === 'xhigh' ? 'XHigh — full matrix' : run.quickSimple ? 'Simple — three prompts per client' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
+  lines.push(`| Run type | ${dry ? 'Dry-smoke — no model calls; local fixture API' : run.followup ? 'Follow-up model checks — not full required coverage' : run.modelChecks ? 'Model checks only — infrastructure unverified' : run.profile === 'high' ? 'High — broad coverage with one cross-client cycle' : run.profile === 'xhigh' ? 'XHigh — full matrix' : run.quickSimple ? 'Simple — three prompts per client' : run.simple ? 'Simple cycle — not full required coverage' : run.required ? 'Required matrix' : 'Focused validation'} |`);
   if (run.followup) {
     lines.push(`| Verified baseline | ${esc(run.followup.baselineRunId)}; results SHA-256 ${esc(run.followup.reportSha256)} |`);
     lines.push('| Prior evidence | Project isolation, upgrade and client-specific checks were verified in the baseline, not rerun or counted as new passes. |');
@@ -63,8 +76,8 @@ export function renderMarkdown(results) {
   if (run.promptCount !== undefined) lines.push(`| Returned turn records | ${run.promptCount}; ${Object.entries(run.promptsByClient || {}).map(([id, n]) => `${id}=${n}`).join(', ')} |`);
   if (run.costs) lines.push(`| Prompt attempts | ${run.costs.totalTurns}; includes failed launches |`);
   for (const [id, costs] of Object.entries(run.costs?.clients || {})) lines.push(`| ${esc(id)} cost | ${esc(costLabel(costs))} |`);
-  lines.push(`| Model cost accounting | ${esc(costLabel(run.costs))}; excludes unreported usage, runner and backend costs. |`);
-  lines.push(`| Client concurrency | ${run.concurrency ?? 1} (cold capture, upgrade and client-specific scenarios serial) |`);
+  lines.push(dry ? '| Model calls | 0 — no provider credentials or model prompts |' : `| Model cost accounting | ${esc(costLabel(run.costs))}; excludes unreported usage, runner and backend costs. |`);
+  if (!dry) lines.push(`| Client concurrency | ${run.concurrency ?? 1} (cold capture, upgrade and client-specific scenarios serial) |`);
   if (run.crossClientPairs) lines.push(`| Planned cross-client links | ${run.crossClientPairs.map(p => `${esc(p.writer)} → ${esc(p.reader)}`).join(', ') || 'None selected'} |`);
   lines.push(`| Candidate | \`${candidate.name}\` ${candidate.version} @ \`${candidate.shortSha}\`${candidate.dirty ? ' (dirty tree)' : ''} (${candidate.mode} mode, branch ${candidate.branch}) |`);
   if (candidate.pack && !candidate.pack.error) lines.push(`| Source archive | ${candidate.pack.filename}, ${candidate.pack.entryCount} entries, ${candidate.pack.integrity} |`);
@@ -72,10 +85,23 @@ export function renderMarkdown(results) {
   lines.push(`| Host | ${run.platform}/${run.arch} ${run.osRelease}, node ${run.node} |`);
   lines.push(`| Run marker | \`${run.marker}\` |`);
   lines.push(`| Started / finished | ${run.startedAt} / ${run.finishedAt} |`);
-  lines.push(`| Read-back ceiling / index grace | ${run.readbackTimeoutMs} ms / ${run.indexGraceMs} ms |`);
+  if (!dry) lines.push(`| Read-back ceiling / index grace | ${run.readbackTimeoutMs} ms / ${run.indexGraceMs} ms |`);
   lines.push(`| Isolation (real home untouched) | ${isolation.ok ? BADGE.PASS : BADGE.FAIL}${isolation.drift.length ? ` — ${isolation.drift.length} surface(s) drifted` : ''} |`);
   lines.push('');
   lines.push('## What needs attention', '', attentionText(cells.map(c => findingContext(c, run.models)), { markdown: true }), '');
+  if (dry && Object.keys(results.contextPreviews || {}).length) {
+    lines.push('## MCP context preview', '', 'Observed tool definitions, arguments, results and errors. This is a preview, not a native model request; no model request was created or sent.', '');
+    for (const [id, preview] of Object.entries(results.contextPreviews)) lines.push(`- ${id}: ${preview.calls.length} attempts · [readable log](${preview.artifacts.markdown}) · [JSON](${preview.artifacts.json}) · [event log](${preview.artifacts.events})${preview.recordingComplete ? '' : ' · INCOMPLETE'}`);
+    lines.push('');
+  }
+  if (dry) {
+    lines.push('## Per-tool coverage', '', 'Discovery alone is not execution. Positive results require a recorded call and a passing assertion. N/A means the tool has no arguments; NOT COVERED is an explicit gap.', '');
+    for (const client of clients) {
+      lines.push(`### ${client.displayName}`, '', '| Tool | Discovered | Schema | Positive | Invalid input | Failure recovery |', '|---|---|---|---|---|---|');
+      for (const t of reportToolCoverage(results, client.id)) lines.push(`| ${t.name} | ${t.discovered ? 'YES' : 'NO'} | ${t.schema} | ${t.positive} | ${t.invalid} | ${t.recovery} |`);
+      lines.push('');
+    }
+  }
   lines.push('## Clients');
   lines.push('');
   lines.push('| Client | Version | Runnable | Config shape (hashes) | Known exceptions |');
@@ -89,7 +115,7 @@ export function renderMarkdown(results) {
   lines.push('');
   lines.push(`| Check | ${clients.map((c) => c.displayName).join(' | ')} |`);
   lines.push(`|---|${clients.map(() => '---').join('|')}|`);
-  for (const row of ROWS) {
+  for (const row of rows) {
     lines.push(`| ${row} | ${ids.map((id) => (matrix[row][id] ? BADGE[matrix[row][id]] : '—')).join(' | ')} |`);
   }
   lines.push('');

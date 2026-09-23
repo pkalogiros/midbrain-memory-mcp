@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from 'node:fs';
 import { spawnCapture } from './proc.mjs';
 import { childEnv, HARNESS_DIR } from './context.mjs';
+import { smokeEnv } from './dry-smoke-policy.mjs';
 
 export function seedDetectionFixtures(ctx, manifests) {
   const written = [];
@@ -70,7 +71,7 @@ export async function installCandidate(ctx, candidate, { cwd, extraArgs = [], la
     cmd = process.execPath;
     args = [path.join(candidate.repoRoot, 'install.mjs'), '--dev', '--non-interactive', '--no-login', ...extraArgs];
   }
-  const r = await spawnCapture(cmd, args, { cwd, env: childEnv(ctx), timeoutMs: 300000 });
+  const r = await spawnCapture(cmd, args, { cwd, env: ctx.options.drySmoke ? smokeEnv(ctx) : childEnv(ctx), timeoutMs: 300000 });
   const logDir = path.join(ctx.dirs.evidence, '_install');
   mkdirSync(logDir, { recursive: true });
   writeFileSync(path.join(logDir, `${label}.stdout.txt`), r.stdout);
@@ -88,7 +89,7 @@ export async function inspectInstall(ctx, candidate, clientId, { installed = fal
     : [script, candidate.repoRoot, clientId];
   const r = await spawnCapture(command, args, {
     cwd: ctx.dirs.run,
-    env: childEnv(ctx),
+    env: ctx.options.drySmoke ? smokeEnv(ctx) : childEnv(ctx),
     timeoutMs: 30000,
   });
   try {

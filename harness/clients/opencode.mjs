@@ -11,6 +11,13 @@ import { BlockedError } from '../lib/checks.mjs';
 const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 300000);
 const PKG = 'opencode-ai';
 
+export function nativeUsage(parts) {
+  const steps = [...new Map(parts.filter(p => typeof p.id === 'string' && p.id).map(p => [p.id, { id: p.id, tokens: p.tokens ?? null, cost: p.cost ?? null }])).values()];
+  const complete = steps.length > 0 && steps.every(p => typeof p.cost === 'number' && Number.isFinite(p.cost) && p.cost >= 0);
+  return { usage: { steps }, cost: complete ? steps.reduce((total, p) => total + p.cost, 0) : null,
+    costIncomplete: !complete, costSource: 'OpenCode client step_finish cost; not a reconciled provider invoice' };
+}
+
 export function toolCall(part, ctx, evidenceDir, label) {
   const state = part.state || {};
   const call = { id: part.callID || part.id, name: part.tool, server: /midbrain/i.test(String(part.tool)) ? 'midbrain-memory' : undefined,
@@ -62,7 +69,7 @@ export default {
     const prefix = path.join(ctx.dirs.tools, 'opencode');
     mkdirSync(prefix, { recursive: true });
     const spec = `${PKG}@${this.install.version}`;
-    const r = await spawnCapture('npm', ['install', '--prefix', prefix, spec, '--no-audit', '--no-fund', '--no-package-lock'], { cwd: prefix, env: { ...process.env, NO_COLOR: '1' }, timeoutMs: 300000 });
+    const r = await spawnCapture('npm', ['install', '--prefix', prefix, spec, '--no-audit', '--no-fund', '--no-package-lock'], { cwd: prefix, env: ctx.options.drySmoke ? childEnv(ctx) : { ...process.env, NO_COLOR: '1' }, timeoutMs: 300000 });
     if (r.code !== 0) throw new BlockedError(`run-local install of ${spec} failed: ${r.stderr.trim().slice(-300)}`);
     const installed = path.join(prefix, 'node_modules', '.bin', process.platform === 'win32' ? 'opencode.cmd' : 'opencode');
     if (!existsSync(installed)) throw new BlockedError(`${spec} installed but no opencode binary at ${installed}`);
@@ -101,6 +108,7 @@ export default {
     let streamText = '';
     let messageId;
     const streamTools = new Map();
+    const usageParts = [];
     const r = await spawnCapture('opencode', args, {
       cwd: project,
       env: this.clientEnv(ctx),
@@ -112,6 +120,7 @@ export default {
         const sid = ev.sessionID || ev.properties?.sessionID || ev.properties?.info?.sessionID || ev.part?.sessionID;
         if (sid && !turn.sessionId) turn.sessionId = sid;
         if (ev.type === 'error') { turn.isError = true; turn.errorDetail = JSON.stringify(ev.error || ev).slice(0, 500); }
+        if (ev.type === 'step_finish' && ev.part?.type === 'step-finish') usageParts.push(ev.part);
         if (ev.type === 'text' && typeof ev.part?.text === 'string') {
           if (ev.part.messageID !== messageId) streamText = '';
           messageId = ev.part.messageID;
@@ -129,6 +138,8 @@ export default {
     turn.timedOut = r.timedOut;
     turn.finalText = streamText;
     turn.toolCalls = [...streamTools.values()];
+    Object.assign(turn, nativeUsage(usageParts));
+    if (turn.timedOut || turn.isError || turn.exitCode !== 0) turn.costIncomplete = true;
     if (turn.sessionId) {
       const exp = await spawnCapture('opencode', ['export', turn.sessionId], { cwd: project, env: this.clientEnv(ctx), timeoutMs: 60000 });
       if (exp.code === 0 && exp.stdout.trim()) {

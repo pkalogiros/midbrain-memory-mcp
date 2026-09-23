@@ -1,0 +1,10 @@
+{
+  "models": {
+    "claude": "claude-haiku-4-5",
+    "opencode": "anthropic/claude-haiku-4-5",
+    "hermes": "claude-haiku-4-5",
+    "pi": "claude-haiku-4-5"
+  },
+  "timeoutMs": 90000,
+  "maxMcpCalls": 4
+}

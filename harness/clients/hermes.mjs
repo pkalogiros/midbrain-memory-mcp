@@ -13,6 +13,15 @@ const TURN_TIMEOUT_MS = Number(process.env.MIDBRAIN_HARNESS_TURN_TIMEOUT_MS || 3
 const PKG = 'hermes-agent[mcp]';
 const SESSION_RE = /\b(session[_ -]?id|session)\b[^A-Za-z0-9_-]{0,6}([A-Za-z0-9_-]{8,})/i;
 
+export function parseHermesToolPayload(value) {
+  if (typeof value !== 'string') return value;
+  // Newer Hermes versions wrap external results in a trust-boundary notice.
+  // Keep the original receipt; decode only the complete, anchored wrapper.
+  const wrapped = value.match(/^<untrusted_tool_result source="[A-Za-z0-9_-]+">\n[^]*?\n\n([^]*)\n<\/untrusted_tool_result>$/);
+  try { return JSON.parse(wrapped ? wrapped[1] : value); }
+  catch { return undefined; }
+}
+
 export function parseSessionExport(jsonl, prompt) {
   const toolCalls = [];
   let finalText = '';
@@ -37,8 +46,7 @@ export function parseSessionExport(jsonl, prompt) {
       const target = toolCalls.find((t) => t.id && t.id === (row.tool_call_id || row.toolCallId));
       if (target) {
         target.result = typeof row.content === 'string' ? row.content : JSON.stringify(row.content ?? '');
-        let payload = row.content;
-        try { payload = JSON.parse(target.result); } catch { /* Hermes also returns plain text errors. */ }
+        const payload = parseHermesToolPayload(row.content);
         target.ok = !(row.is_error || row.isError || payload?.error || payload?.isError || payload?.success === false || /^(?:Error:|Tool '.+' does not exist\.)/.test(target.result.trim()));
       }
     }
@@ -81,7 +89,7 @@ export default {
     if (existsSync(bin)) return bin;
     if (!whichSync('uv')) throw new BlockedError('uv not found on PATH (needed to install hermes-agent run-locally)');
     const spec = this.install.version ? `${PKG}==${this.install.version}` : PKG;
-    const env = { ...process.env, UV_TOOL_DIR: path.join(ctx.dirs.tools, 'hermes', 'tools'), UV_TOOL_BIN_DIR: ctx.dirs.toolsBin, NO_COLOR: '1' };
+    const env = { ...(ctx.options.drySmoke ? childEnv(ctx) : process.env), UV_TOOL_DIR: path.join(ctx.dirs.tools, 'hermes', 'tools'), UV_TOOL_BIN_DIR: ctx.dirs.toolsBin, NO_COLOR: '1' };
     mkdirSync(env.UV_TOOL_DIR, { recursive: true });
     const r = await spawnCapture('uv', ['tool', 'install', spec, '--python', '3.12'], { cwd: ctx.dirs.tools, env, timeoutMs: 600000 });
     if (r.code !== 0 || !existsSync(bin)) throw new BlockedError(`run-local install of ${spec} failed: ${r.stderr.trim().slice(-300)}`);

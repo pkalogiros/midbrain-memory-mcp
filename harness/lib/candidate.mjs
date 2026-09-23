@@ -7,8 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, HARNESS_DIR } from './context.mjs';
 
 export function fileHash(file) { return createHash('sha256').update(readFileSync(file)).digest('hex'); }
-function command(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+function command(cmd, args, cwd, env) {
+  const r = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
   if (r.status !== 0) throw new Error(`${cmd} ${args[0]} failed: ${(r.stderr || r.error?.message || '').slice(-1000)}`);
   return r.stdout.trim();
 }
@@ -43,19 +43,19 @@ export function assertCandidate(candidate) {
   if (candidate.registry && fileHash(candidate.registry.tarball) !== candidate.registry.publishedSha256) throw new Error('Registry candidate tarball changed');
 }
 
-export async function freezeCandidate({ mode = 'dev', directory } = {}) {
+export async function freezeCandidate({ mode = 'dev', directory, env } = {}) {
   if (!['dev', 'registry'].includes(mode)) throw new Error(`unknown candidate mode "${mode}" (dev | registry)`);
   const dir = directory || mkdtempSync(path.join(os.tmpdir(), 'midbrain-candidate-'));
   mkdirSync(dir, { recursive: true });
-  command('npm', ['run', 'build:plugin'], REPO_ROOT);
-  const pack = JSON.parse(command('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', dir], REPO_ROOT))[0];
+  command('npm', ['run', 'build:plugin'], REPO_ROOT, env);
+  const pack = JSON.parse(command('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', dir], REPO_ROOT, env))[0];
   const tarball = path.join(dir, pack.filename);
-  command('tar', ['-xzf', tarball, '-C', dir], REPO_ROOT);
+  command('tar', ['-xzf', tarball, '-C', dir], REPO_ROOT, env);
   const repoRoot = path.join(dir, 'package');
   // npm excludes lockfiles from published packages; preserve the source lock
   // separately and use it for the isolated dev runtime's exact dependencies.
   cpSync(path.join(REPO_ROOT, 'package-lock.json'), path.join(repoRoot, 'package-lock.json'));
-  command('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], repoRoot);
+  command('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], repoRoot, env);
   const harnessDir = path.join(dir, 'harness');
   const harnessFiles = snapshotFiles(HARNESS_DIR, { include: file => /\.(mjs|json|ts|py)$/.test(file) || path.basename(file) === 'Dockerfile' });
   for (const rel of Object.keys(harnessFiles)) {

@@ -479,12 +479,21 @@ function help() {
   console.log(`midbrain multi-client harness v${HARNESS_VERSION}
 
 commands
+  scripted-smoke [--clients pi|opencode] [--root DIR] [--install-clients]
+    Real Pi, OpenCode or Hermes tool round trips with a local scripted provider. Zero LLM inference.
+  live-smoke --config FILE [--clients a,b] [--execute] [--root DIR] [--install-clients]
+           plan by default; --execute runs two bounded real-model tool scenarios against a local fixture
+  dry-smoke [--clients a,b] [--root DIR] [--install-clients]
+           model-free MCP integration checks; local fixture API and synthetic keys, no .env needed
   doctor   [--clients a,b]          readiness of this machine (clients, secrets, API, run root)
   freeze   [--mode dev]             print the frozen candidate identity (registry mode is prepared inside run)
   run      [--clients a,b] [--scenarios s01,s06] [--mode dev|registry] [--upgrade] [--simple | --high | --xhigh] [--required] [--keep]
            [--readback-timeout-ms N] [--index-grace-ms N] [--root DIR] [--concurrency N]
            [--interactive]
   report   <runDir|sweepDir>        re-render Markdown/HTML results without model calls
+  review-bundle <runDir> [runDir...] --output NEW_DIR
+           Export selected dry/scripted evidence with an offline overview and hashes.
+  verify-review <bundleDir>        verify bundle integrity, not test success or authorship
   sweep    --follow-up RUN --models FILE [--parallel-runs 1] [--concurrency 4]
   sweep    --model-checks --models FILE [--parallel-runs 1] [--concurrency 4]
 
@@ -516,6 +525,28 @@ secrets (harness/.env or environment): MIDBRAIN_HARNESS_API_KEY, MIDBRAIN_HARNES
 
 const { cmd, flags } = parseArgs(process.argv.slice(2));
 const commands = { doctor, freeze, run, report, help };
+commands['review-bundle'] = async flags => {
+  if (Object.keys(flags).some(key => !['_', 'output'].includes(key)) || typeof flags.output !== 'string') throw new Error('Usage: review-bundle <runDir> [runDir...] --output NEW_DIR');
+  const { exportReviewBundle } = await import('./lib/review-bundle.mjs');
+  const result = exportReviewBundle(flags._, flags.output); console.log(`Review bundle: ${result.index}\n${result.runs.length} runs; ${result.files} verified files. Test outcomes are listed in the overview.`);
+};
+commands['verify-review'] = async flags => {
+  if (Object.keys(flags).some(key => key !== '_') || flags._.length !== 1) throw new Error('Usage: verify-review <bundleDir>');
+  const { verifyReviewBundle } = await import('./lib/review-bundle.mjs');
+  const result = verifyReviewBundle(flags._[0]); console.log(JSON.stringify(result, null, 2)); process.exitCode = result.ok ? 0 : 1;
+};
+commands['live-smoke'] = async flags => {
+  const { runLiveSmoke } = await import('./lib/live-smoke.mjs');
+  await runLiveSmoke(flags);
+};
+commands['scripted-smoke'] = async flags => {
+  const { runScriptedSmoke } = await import('./lib/scripted-smoke.mjs');
+  return runScriptedSmoke(flags);
+};
+commands['dry-smoke'] = async flags => {
+  const { runDrySmoke } = await import('./lib/dry-smoke.mjs');
+  await runDrySmoke(flags);
+};
 commands.sweep = async flags => {
   loadDotEnv(path.join(HARNESS_DIR, '.env'));
   const { runSweep } = await import('./lib/sweep.mjs');

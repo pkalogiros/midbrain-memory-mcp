@@ -3,6 +3,9 @@ import { addFailureTraces } from './failure-traces.mjs';
 import { findingContext, attentionText } from './report-copy.mjs';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { renderDrySmokeJUnit } from './dry-smoke-report.mjs';
+import { renderLiveSmokeJUnit } from './live-smoke-report.mjs';
+import { renderScriptedJUnit } from './scripted-smoke-report.mjs';
 import { renderMarkdown } from './report.mjs';
 import { renderRunHtml, renderSweepHtml } from './report-html.mjs';
 import { recordedCosts, combineCosts, costLabel } from './costs.mjs';
@@ -29,6 +32,7 @@ export function describeFailure(cell, turn = {}) {
 }
 
 export function withFailureContext(report) {
+  if (['dry-smoke', 'live-smoke', 'scripted-smoke'].includes(report.run.kind)) return report;
   const root = report.run.runDir;
   return { ...report, cells: report.cells.map(cell => {
     if (cell.status === 'PASS') return cell;
@@ -71,6 +75,13 @@ export function renderSavedReports(directory) {
     return out;
   }
   const report = JSON.parse(readFileSync(path.join(directory, 'results.json'), 'utf8'));
+  if (['dry-smoke', 'live-smoke', 'scripted-smoke'].includes(report.run.kind)) {
+    writeFileSync(path.join(directory, 'junit.xml'), report.run.kind === 'scripted-smoke' ? renderScriptedJUnit(report) : report.run.kind === 'live-smoke' ? renderLiveSmokeJUnit(report) : renderDrySmokeJUnit(report));
+    writeFileSync(path.join(directory, 'report.md'), renderMarkdown(report));
+    const out = path.join(directory, 'report.html');
+    writeFileSync(out, renderRunHtml(report));
+    return out;
+  }
   const observedCosts = recordedCosts(directory);
   report.run.costs = observedCosts.totalTurns ? observedCosts : report.run.costs;
   writeFileSync(path.join(directory, 'costs.json'), JSON.stringify(report.run.costs, null, 2) + '\n');

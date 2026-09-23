@@ -1,15 +1,27 @@
 # Testing MidBrain across AI clients
 
-**Run this** from the repository root, after [one-time setup](#local-setup):
+**For MCP integration testing, start here** from the repository root after `npm ci`:
+
+```bash
+# All five clients: MCP contracts and native discovery, no models.
+node harness/run.mjs dry-smoke --install-clients
+# Real Pi tool dispatch and returned provider context, no LLM inference.
+node harness/run.mjs scripted-smoke --clients pi --install-clients
+```
+
+Claude and Codex must already be installed; Hermes installation needs `uv`.
+Both commands print an offline `report.html` path and exit nonzero on incomplete,
+blocked or failed coverage. Neither needs model or MidBrain credentials.
+
+For a few real-model tool checks, use `live-smoke` with explicit models and
+`--execute`. For memory behavior, use the existing behavioral suite:
 
 ```bash
 node harness/run.mjs run --simple --mode registry --clients claude,codex,hermes,nanoclaw --concurrency 4
 ```
 
-Runs three prompts each in Claude, Codex, Hermes and NanoClaw. Progress appears in the
-terminal. When it finishes, open the printed `report.html` path. Press Ctrl+C to stop.
-
-For more coverage, replace `--simple` with `--high` or `--xhigh`.
+That behavioral command sends three real-model prompts per client. Use `--high`
+or `--xhigh` for broader behavioral coverage. Press Ctrl+C to stop any run.
 
 ---
 
@@ -24,14 +36,143 @@ The default clients are OpenCode, Claude Code, Codex, Hermes and NanoClaw. Add P
 `--clients claude,pi` or test it alone with `--clients pi`. Pi's installer integration
 ships in the product, even though tests only include it when selected.
 
-Runs use real models and a real MidBrain API. NanoClaw uses its upstream runner in Docker
+Behavioral runs use real models and a real MidBrain API. NanoClaw uses its upstream runner in Docker
 with a local test mailbox; external messaging integrations are outside these tests.
+
+## Dry-smoke: test the MCP without models
+
+```bash
+node harness/run.mjs dry-smoke --install-clients
+```
+
+This mode uses the existing candidate, installer, isolated homes and reports. It
+calls all 12 MCP tools against a local synthetic API and separately checks native
+connection/discovery in OpenCode, Claude, Codex, Hermes and Pi. It sends no model
+prompts and needs no API keys or Docker. Claude/Codex must be on PATH; missing
+OpenCode/Hermes/Pi can be installed run-locally (`uv` is needed for Hermes).
+
+A separate SDK protocol audit records the negotiated version and capabilities,
+checks ping and unsupported requests, then verifies that discovery still works.
+Protocol exchanges and compatibility notes are retained in the preview and logs.
+The SDK’s unknown-tool error representation differs from the specification;
+operational tool failures now require `isError: true` and retain useful text.
+Empty successful results must remain successful. Recovery passes do not claim
+complete protocol conformance.
+
+Failures include invalid arguments, unavailable/malformed API responses,
+missing/empty credentials and corrupt account state, followed by recovery checks.
+Missing clients and unsupported probes are **BLOCKED**, and **FAIL, BLOCKED or
+incomplete coverage all exit nonzero**. Direct tool execution and native discovery
+are reported separately; memory quality and model behavior remain untested.
+Each client also gets an MCP context preview: observed tool definitions, arguments,
+results and errors, in the HTML report and JSON/Markdown logs. Incremental event
+logs preserve attempted calls on interruption. This is not a native model request;
+no model request is created or sent.
+The preview separates arguments and responses, labels scenario verdicts, and
+supports searching, filtering and links to individual exchanges. Damaged or
+inconsistent event logs are retained as incomplete evidence and fail validation.
+The HTML and Markdown reports also show per-tool discovery, schema, positive, invalid-input and recovery coverage. Recovery gaps are labelled NOT COVERED.
+See [dry-smoke coverage, failure handling and OS limits](dry-smoke.md) for the exact checks.
+
+## Scripted-smoke: native tool dispatch without LLM inference
+
+```bash
+node harness/run.mjs scripted-smoke --clients pi --install-clients
+```
+
+This mode launches **real Pi, OpenCode or Hermes** with the installed MCP and a local scripted provider.
+Select one per run with `--clients pi`, `--clients opencode` or `--clients hermes`.
+The script requests every one of the 12 tools, then injects a backend 503 and asks
+for a successful follow-up. It advances only when the native client returns the correlated result.
+Native events, MCP arguments/results and fixture HTTP receipts must agree. One
+Pi or Hermes session is capped at 14 tool calls and 15 local completion requests. OpenCode
+also calls a second MCP server exposing its own `memory_search`: 15 tool calls
+and 16 local completion requests. Hermes also permits at most 16 local capability-discovery GETs, logged separately. All sessions have a 90-second deadline. The peer query
+must reach the independent server and must never reach MidBrain.
+
+The report includes **actual request bodies sent by the client to the local provider**:
+tool definitions, conversation messages, arguments and returned results, with
+synthetic credentials redacted. Provider attempt totals include malformed and
+rejected requests; early rejections retain metadata/reasons rather than a body.
+Current scripted reports require every versioned assertion ID exactly once.
+Provider requests and MCP events are also logged
+incrementally. This adds native dispatch evidence beyond dry-smoke's direct probes;
+it makes zero LLM calls and does not assess model decisions or memory quality.
+
+The supported adapters are Pi, OpenCode and Hermes. Other clients and combined selections
+are rejected explicitly. A missing native client is BLOCKED; failed or incomplete evidence exits nonzero. No real-provider
+fallback is configured. See [the scripted-smoke reference](scripted-smoke.md) for
+commands, evidence boundaries, failure handling and recorded validation.
+
+
+## Recommended release layers
+
+1. Run `npm run check` on each change for deterministic regressions, error envelopes and isolation rules.
+2. Run native dry-smoke and scripted-smoke on MCP/installer/client integration changes. The `MCP integration (no models)` workflow is configured for Linux/macOS, with reports retained even on failure; remote results must still be recorded.
+3. Before release, run a small explicitly approved live-smoke configuration to check the real-model boundary. Inspect native usage and accounting gaps; call/time limits are not a dollar budget.
+4. Run the full behavioral suite when capture, retrieval or memory behavior changes.
+
+Current local evidence covers all five dry-smoke clients and native scripted Pi,
+OpenCode and Hermes on macOS arm64. Operational failures carry `isError: true`;
+empty successes remain successful. Account creation now rolls back a created agent
+when key minting fails, and reports the orphan ID if cleanup fails. Tests exercise
+both cleanup outcomes, credential preservation and subsequent recovery.
+
+Remaining gaps include recorded remote Linux/macOS CI, a paid live-smoke result,
+native Windows validation, scripted Claude/Codex adapters, cancellation and timed-out
+request recovery, and interrupted account transactions across process restarts.
+These gaps remain visible rather than counting as passing coverage.
+
+## Hand over MCP review evidence
+
+```bash
+node harness/run.mjs review-bundle /path/to/dry-run /path/to/pi-run /path/to/opencode-run --output /path/to/new-review
+node harness/run.mjs verify-review /path/to/new-review
+```
+
+Open the exported `index.html` for a comparison of recorded runs and links to their
+reports. Export selects synthetic evidence, redacts fixture credentials, excludes
+private homes/configuration, and generates a SHA-256 manifest. Source runs stay
+unchanged. Missing evidence or unsafe paths fail export. Verification detects
+changed, missing or unlisted files; it verifies bundle integrity, not test success
+or authorship. Failed and interrupted runs retain their status. This is review
+evidence, not release sign-off. See [review export and verification](mcp-review-bundles.md).
+
+## Live-smoke: verify real native tool execution
+
+```bash
+# Plan only; adding --execute makes real provider requests.
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude
+```
+
+Live-smoke adds two bounded native sessions per selected client: **Call and consume**
+and **Error and recovery**. Real models call the installed MCP against a synthetic
+API, so no memory engine or MidBrain key is needed. Native tool events, MCP
+arguments/results, backend requests and a fresh verification value in the answer
+must agree. A model claiming it called a tool is insufficient.
+
+Select models explicitly; the example uses the existing Haiku IDs for the Anthropic
+paths. Codex needs its own explicit model and OpenAI API key. All prerequisites
+are checked before model sessions start. The default deadline is 90 seconds per
+session and the MCP call cap is four, shared across reconnects. No harness retries
+or model escalation occur. A failed first scenario skips that client's second paid
+scenario. These controls are not hard dollar/token caps, and missing usage/cost
+remains unreported.
+
+The HTML/Markdown/JSON/JUnit reports include native evidence, searchable MCP
+exchanges and strict nonzero gates for failed, blocked or incomplete coverage.
+The full runner has model-free tests using a simulated native CLI; a real-model
+live-smoke pass has not yet been recorded. See the [live-smoke reference](live-smoke.md)
+for setup, exact scoring rules, evidence and limitations.
 
 ## Architecture
 
-There are two kinds of tests:
+There are five layers of tests:
 
 - **Code tests** check installation, configuration, credentials and recovery without paid model calls. CI runs them on Linux, macOS and Windows.
+- **Dry-smoke tests** exercise the packaged MCP and native client discovery against a synthetic API, with no model calls.
+- **Scripted-smoke tests** send deterministic tool calls through real Pi, OpenCode or Hermes and verify the returned results, with zero LLM inference.
+- **Live-smoke tests** use a few real model sessions to verify explicitly requested native tool execution against the synthetic API.
 - **Client tests** use real models to check whether memory is saved and used correctly. Passing code tests alone does not prove this works.
 
 ```mermaid
