@@ -22,8 +22,8 @@ of dry-smoke; run both when collecting integration evidence.
 
 ```bash
 npm ci
-node harness/run.mjs dry-smoke --clients claude
-node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude
+node harness/run.mjs dry-smoke --clients claude,codex
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude,codex
 ```
 
 Without `--execute`, live-smoke only prints its plan. It does not load `.env`,
@@ -31,17 +31,26 @@ launch clients, install packages or make model requests. `--plan` is also accept
 The plan shows the selected models, number of scenarios, required provider keys,
 deadline and MCP call cap.
 
-The example selects Haiku model IDs already used by the existing harness for
-Claude, OpenCode, Hermes and Pi. It is a starting configuration, not a current
-pricing quote or a guarantee that an account can access those models. Choose an
-inexpensive model that supports tools and is available to your account.
+The checked-in example includes all five clients:
 
-Codex is supported but deliberately has no implicit model selection. Add
-`"codex": "your-explicit-codex-model-id"` to your own JSON file, replacing that
-placeholder with an actual accessible model ID. OpenCode accepts explicit
-`anthropic/model-id` or `openai/model-id` selections. Hermes and Pi currently use
-the existing Anthropic launcher path. Claude uses Anthropic and Codex uses OpenAI
-API-key authentication; this mode does not copy your normal client login.
+| Client | Explicit model | Credential |
+|---|---|---|
+| Claude Code | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+| Codex | `gpt-6-luna` | `OPENAI_API_KEY` |
+| OpenCode | `openai/gpt-6-luna` | `OPENAI_API_KEY` |
+| Hermes | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+| Pi | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+
+Selecting `--clients claude,codex` produces four bounded sessions: call-and-consume
+and error-and-recovery for each client. Both clients also belong to the default
+dry-smoke matrix; `dry-smoke --clients claude,codex` narrows that zero-model run.
+
+Luna is the OpenAI model selection; it is not the name of the testing mode.
+Claude Code, Hermes and Pi use the existing Anthropic launcher path. Running
+Claude Code against Luna would require a protocol bridge, which this live-smoke
+path does not implement. Codex uses OpenAI API-key authentication, without copying
+your normal client login. OpenCode accepts explicit `anthropic/model-id` or
+`openai/model-id` selections. Model/account access still needs live validation.
 
 Unknown settings, missing models, duplicate clients, `latest` model selections,
 and production API/model-sweep/upgrade flags are rejected. Selecting fewer clients
@@ -50,10 +59,10 @@ reduces the run rather than silently skipping missing prerequisites.
 ## Execute deliberately
 
 ```bash
-# Requires ANTHROPIC_API_KEY in the environment or harness/.env.
+# Requires ANTHROPIC_API_KEY and OPENAI_API_KEY in the environment or harness/.env.
 node harness/run.mjs live-smoke \
   --config harness/live-smoke.example.json \
-  --clients claude \
+  --clients claude,codex \
   --execute
 
 # OpenCode, Hermes and Pi may be installed into the isolated run directory.
@@ -195,5 +204,5 @@ token counts and client-reported cost, deduplicated by step ID. Missing cost sta
 unreported; interrupted execution is marked incomplete. These are client accounting
 records, not a reconciled provider invoice or a hard dollar cap.
 
-The requested `openai/gpt-6-luna` configuration has passed plan validation. Paid
+The checked-in Claude Haiku + Codex Luna plan and the complete five-client plan have passed zero-prompt validation. Paid
 execution is pending an approved spending limit; no model pass is claimed yet.

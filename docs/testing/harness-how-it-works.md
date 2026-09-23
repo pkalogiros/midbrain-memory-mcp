@@ -146,7 +146,7 @@ evidence, not release sign-off. See [review export and verification](mcp-review-
 
 ```bash
 # Plan only; adding --execute makes real provider requests.
-node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude,codex
 ```
 
 Live-smoke adds two bounded native sessions per selected client: **Call and consume**
@@ -155,8 +155,10 @@ API, so no memory engine or MidBrain key is needed. Native tool events, MCP
 arguments/results, backend requests and a fresh verification value in the answer
 must agree. A model claiming it called a tool is insufficient.
 
-Select models explicitly; the example uses the existing Haiku IDs for the Anthropic
-paths. Codex needs its own explicit model and OpenAI API key. All prerequisites
+The example includes Claude Code on Haiku and Codex/OpenCode on GPT-6 Luna;
+Hermes/Pi use Haiku. Selecting `--clients claude,codex` plans four native sessions
+and requires both Anthropic and OpenAI API keys. Claude Code uses its native
+Anthropic path; it does not run Luna through a protocol bridge. All prerequisites
 are checked before model sessions start. The default deadline is 90 seconds per
 session and the MCP call cap is four, shared across reconnects. No harness retries
 or model escalation occur. A failed first scenario skips that client's second paid

@@ -1,7 +1,8 @@
 {
   "models": {
     "claude": "claude-haiku-4-5",
-    "opencode": "anthropic/claude-haiku-4-5",
+    "codex": "gpt-6-luna",
+    "opencode": "openai/gpt-6-luna",
     "hermes": "claude-haiku-4-5",
     "pi": "claude-haiku-4-5"
   },

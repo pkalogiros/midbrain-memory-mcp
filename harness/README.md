@@ -159,9 +159,9 @@ evidence, not release sign-off. See [review export and verification](../docs/tes
 
 ```bash
 # Plan only: no credentials loaded and no model calls.
-node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude
-# Explicit execution: two bounded native sessions against a synthetic API.
-node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude --execute
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude,codex
+# Explicit execution: two bounded native sessions per client against a synthetic API.
+node harness/run.mjs live-smoke --config harness/live-smoke.example.json --clients claude,codex --execute
 ```
 
 This mode checks **Call and consume** and **Error and recovery**, using the real
@@ -170,8 +170,10 @@ HTTP requests and fresh verification values in the answer must agree. It tests
 explicit tool execution, not memory quality. Provider credentials are required;
 a MidBrain deployment/key and Docker are not.
 
-Models are explicit per client. The example uses the existing harness's Haiku IDs
-for four Anthropic paths; add an accessible Codex model to include Codex. The default
+Models are explicit per client. The example includes Claude Code on Haiku, Codex
+and OpenCode on GPT-6 Luna, and Hermes/Pi on Haiku. Selecting Claude and Codex
+requires both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`; it plans four native sessions.
+Claude Code uses its native Anthropic path; a Claude-to-Luna protocol bridge is not included. The default
 90-second worker deadline and four-call MCP cap bound each session, including
 reconnects. They are not dollar/token caps. No harness retries or model escalation
 occur, and a failed first scenario prevents that client's second paid scenario.

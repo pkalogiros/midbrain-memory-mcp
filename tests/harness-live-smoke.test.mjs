@@ -1,10 +1,23 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { buildLivePlan, liveSmokeOutcome, scoreLiveScenario, liveOpenCodeConfig } from '../harness/lib/live-smoke-policy.mjs';
 import { startLiveSmokeApi } from '../harness/lib/live-smoke-fixture.mjs';
 import { redactLive } from '../harness/lib/live-smoke-evidence.mjs';
 import { renderLiveSmokeHtml, renderLiveSmokeMarkdown, renderLiveSmokeJUnit } from '../harness/lib/live-smoke-report.mjs';
 
 describe('live-smoke policy', () => {
+  it('includes both Claude and Codex in the checked-in live-smoke plan with explicit credentials', () => {
+    const config = JSON.parse(readFileSync(new URL('../harness/live-smoke.example.json', import.meta.url), 'utf8'));
+    const plan = buildLivePlan({ clients: 'claude,codex' }, config);
+    expect(plan.clients).toEqual(['claude', 'codex']);
+    expect(plan.models.codex).toBe('gpt-6-luna');
+    expect(plan.credentials).toEqual({ claude: 'ANTHROPIC_API_KEY', codex: 'OPENAI_API_KEY' });
+    expect(plan.scenarios).toBe(4);
+    expect(plan.execute).toBe(false);
+    const all = buildLivePlan({}, config);
+    expect(all.models.opencode).toBe('openai/gpt-6-luna');
+    expect(all.clients.sort()).toEqual(['claude', 'codex', 'hermes', 'opencode', 'pi']);
+  });
   it('pins every OpenCode model choice while preserving the installed MCP and plugin', () => {
     const installed = { mcp: { 'midbrain-memory': { command: ['node', 'index.js'] } }, plugin: ['capture'], model: 'other/default' };
     const config = liveOpenCodeConfig(installed, 'openai/gpt-6-luna');
