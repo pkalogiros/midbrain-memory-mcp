@@ -20,8 +20,12 @@ export const TOOL_CONTRACTS = [
 
 export function checkToolSchema(name, schema) {
   const expected = TOOL_CONTRACTS.find(t => t.name === name);
-  const issues = [];
   if (!expected) return [`Unknown tool ${name}`];
+  return checkSchemaContract(expected, schema);
+}
+
+export function checkSchemaContract(expected, schema) {
+  const issues = [];
   if (schema?.type !== 'object') issues.push('Input schema must be an object');
   if (JSON.stringify(Object.keys(schema?.properties || {}).sort()) !== JSON.stringify(Object.keys(expected.properties).sort())) issues.push('Argument names changed');
   if (JSON.stringify([...(schema?.required || [])].sort()) !== JSON.stringify([...expected.required].sort())) issues.push('Required arguments changed');

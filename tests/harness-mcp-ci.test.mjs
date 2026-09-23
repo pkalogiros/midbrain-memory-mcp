@@ -10,7 +10,7 @@ describe('MCP integration CI boundaries', () => {
     expect(workflow.on.push.paths).toContain('harness/**');
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.jobs['dry-smoke'].strategy.matrix.os).toEqual(['ubuntu-latest', 'macos-latest']);
-    expect(workflow.jobs['scripted-smoke'].strategy.matrix.client).toEqual(['pi', 'opencode', 'hermes']);
+    expect(workflow.jobs['scripted-smoke'].strategy.matrix.client).toEqual(['pi', 'opencode', 'hermes', 'claude', 'codex']);
     expect(source).not.toContain('secrets.');
     expect(source).not.toContain('--execute');
     for (const job of Object.values(workflow.jobs)) {

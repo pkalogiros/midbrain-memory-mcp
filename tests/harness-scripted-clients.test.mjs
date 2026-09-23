@@ -1,15 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import { scriptedClient, scriptedClientConfig, scriptedNativeEvent, scriptedResultText } from '../harness/lib/scripted-smoke-clients.mjs';
+import { scriptedClient, scriptedClientConfig, scriptedNativeEvent, scriptedResultText, correlateCodexSession } from '../harness/lib/scripted-smoke-clients.mjs';
 import { validateScriptedFlags, scriptedOutcome, SCRIPTED_ROWS, scriptedPlan, startScriptedProvider } from '../harness/lib/scripted-smoke-policy.mjs';
 import { TOOL_CONTRACTS } from '../harness/lib/tool-contracts.mjs';
 import { renderScriptedHtml, renderScriptedMarkdown } from '../harness/lib/scripted-smoke-report.mjs';
 
 describe('scripted native adapters', () => {
+  it('correlates Codex native CLI and session receipts without inventing provider IDs', () => {
+    const item = { id: 'item_3', type: 'mcp_tool_call', server: 'midbrain-memory', tool: 'list_files', arguments: {}, status: 'completed', result: { content: [{ type: 'text', text: 'a\nb' }] } };
+    const makeTurn = () => { const turn = { sessionId: 'session', toolCalls: [] }; scriptedNativeEvent('codex', turn, { type: 'item.completed', item }); return turn; };
+    const rows = [{ type: 'session_meta', payload: { id: 'session' } }, { type: 'event_msg', payload: { type: 'item_completed', thread_id: 'session', item: { ...item, type: 'McpToolCall', id: 'script-call-1' } } }];
+    const serialize = data => data.map(JSON.stringify).join('\n');
+    const turn = makeTurn(); correlateCodexSession(turn, serialize(rows));
+    expect(turn.toolCalls[0]).toMatchObject({ id: 'script-call-1', stdoutItemId: 'item_3', server: 'midbrain-memory' });
+    for (const damage of [r => { r[0].payload.id = 'other'; }, r => { r[1].payload.item.server = 'other'; }, r => { r[1].payload.item.result = { content: [] }; }, r => r.push(r[1]), r => { r[1].payload.item.status = 'failed'; }]) {
+      const copy = globalThis.structuredClone(rows); damage(copy); expect(() => correlateCodexSession(makeTurn(), serialize(copy))).toThrow(/Codex/);
+    }
+    expect(scriptedResultText('codex', 'Wall time: 0.002 seconds\nOutput:\n[{"type":"text","text":"a\\nb"}]')).toBe('a\nb');
+  });
   it('selects a supported client explicitly and rejects ambiguous selections', () => {
     expect(() => validateScriptedFlags({ clients: 'opencode' })).not.toThrow();
     expect(scriptedClient('opencode').id).toBe('opencode');
     expect(() => validateScriptedFlags({ clients: 'pi,opencode' })).toThrow(/one client/);
-    expect(() => scriptedClient('claude')).toThrow(/unsupported/i);
+    expect(() => scriptedClient('unknown')).toThrow(/unsupported/i);
+  });
+  it.each(['claude', 'codex'])('routes %s locally while preserving installed integration', id => {
+    expect(() => validateScriptedFlags({ clients: id })).not.toThrow();
+    const current = { hooks: { test: true }, mcp_servers: { test: {} } };
+    const config = scriptedClientConfig(id, 'http://127.0.0.1:4321/v1', current);
+    expect(config.hooks).toEqual(current.hooks); expect(config.mcp_servers).toEqual(current.mcp_servers);
+    if (id === 'codex') {
+      expect(config.model_provider).toBe('midbrain_scripted');
+      expect(config.model_providers.midbrain_scripted).toMatchObject({ base_url: 'http://127.0.0.1:4321/v1', wire_api: 'responses', requires_openai_auth: false, request_max_retries: 0 });
+    } else expect(config.env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:4321');
   });
   it('routes Hermes to a local provider while preserving its installed hooks and MCP', () => {
     expect(() => validateScriptedFlags({ clients: 'hermes' })).not.toThrow();

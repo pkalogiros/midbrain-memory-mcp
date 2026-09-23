@@ -80,15 +80,17 @@ See [dry-smoke coverage, failure handling and OS limits](dry-smoke.md) for the e
 node harness/run.mjs scripted-smoke --clients pi --install-clients
 ```
 
-This mode launches **real Pi, OpenCode or Hermes** with the installed MCP and a local scripted provider.
-Select one per run with `--clients pi`, `--clients opencode` or `--clients hermes`.
+This mode launches **real Pi, OpenCode, Hermes, Claude Code or Codex** with the installed MCP and a local scripted provider.
+Select one per run with `--clients pi`, `--clients opencode`, `--clients hermes`, `--clients claude` or `--clients codex`.
 The script requests every one of the 12 tools, then injects a backend 503 and asks
 for a successful follow-up. It advances only when the native client returns the correlated result.
 Native events, MCP arguments/results and fixture HTTP receipts must agree. One
-Pi or Hermes session is capped at 14 tool calls and 15 local completion requests. OpenCode
+Pi, Hermes, Claude Code or Codex session is capped at 14 tool calls and 15 local completion requests. OpenCode
 also calls a second MCP server exposing its own `memory_search`: 15 tool calls
-and 16 local completion requests. Hermes also permits at most 16 local capability-discovery GETs, logged separately. All sessions have a 90-second deadline. The peer query
+and 16 local completion requests. Hermes also permits at most 16 local capability-discovery GETs; Claude permits up to four startup HEAD probes. These reads are logged separately. All sessions have a 90-second deadline. The peer query
 must reach the independent server and must never reach MidBrain.
+
+Raw MCP schemas are checked separately from the provider catalog. Codex’s provider schema omits numeric bounds and defaults; its native session receipts link provider IDs to CLI events. Claude uses Messages tool blocks, and Codex uses namespaced Responses calls. Claude and Codex must already be installed on PATH.
 
 The report includes **actual request bodies sent by the client to the local provider**:
 tool definitions, conversation messages, arguments and returned results, with
@@ -99,7 +101,7 @@ Provider requests and MCP events are also logged
 incrementally. This adds native dispatch evidence beyond dry-smoke's direct probes;
 it makes zero LLM calls and does not assess model decisions or memory quality.
 
-The supported adapters are Pi, OpenCode and Hermes. Other clients and combined selections
+The supported adapters are Pi, OpenCode, Hermes, Claude Code and Codex. Other clients and combined selections
 are rejected explicitly. A missing native client is BLOCKED; failed or incomplete evidence exits nonzero. No real-provider
 fallback is configured. See [the scripted-smoke reference](scripted-smoke.md) for
 commands, evidence boundaries, failure handling and recorded validation.
@@ -113,13 +115,13 @@ commands, evidence boundaries, failure handling and recorded validation.
 4. Run the full behavioral suite when capture, retrieval or memory behavior changes.
 
 Current local evidence covers all five dry-smoke clients and native scripted Pi,
-OpenCode and Hermes on macOS arm64. Operational failures carry `isError: true`;
+OpenCode, Hermes, Claude Code and Codex on macOS arm64. Operational failures carry `isError: true`;
 empty successes remain successful. Account creation now rolls back a created agent
 when key minting fails, and reports the orphan ID if cleanup fails. Tests exercise
 both cleanup outcomes, credential preservation and subsequent recovery.
 
 Remaining gaps include a paid live-smoke result,
-native Windows validation, scripted Claude/Codex adapters, cancellation and timed-out
+native Windows validation, cancellation and timed-out
 request recovery, and interrupted account transactions across process restarts.
 These gaps remain visible rather than counting as passing coverage.
 
@@ -173,7 +175,7 @@ There are five layers of tests:
 
 - **Code tests** check installation, configuration, credentials and recovery without paid model calls. CI runs them on Linux, macOS and Windows.
 - **Dry-smoke tests** exercise the packaged MCP and native client discovery against a synthetic API, with no model calls.
-- **Scripted-smoke tests** send deterministic tool calls through real Pi, OpenCode or Hermes and verify the returned results, with zero LLM inference.
+- **Scripted-smoke tests** send deterministic tool calls through real Pi, OpenCode, Hermes, Claude Code or Codex and verify the returned results, with zero LLM inference.
 - **Live-smoke tests** use a few real model sessions to verify explicitly requested native tool execution against the synthetic API.
 - **Client tests** use real models to check whether memory is saved and used correctly. Passing code tests alone does not prove this works.
 

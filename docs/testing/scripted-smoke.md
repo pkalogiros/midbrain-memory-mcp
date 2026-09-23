@@ -1,8 +1,8 @@
 # Scripted-smoke: native MCP execution without LLM inference
 
 This mode extends the existing harness. It packages the candidate, runs the real
-installer in an isolated home, launches **real Pi, OpenCode or Hermes**, and gives it a loopback
-OpenAI-compatible endpoint. That endpoint returns predetermined tool calls instead
+installer in an isolated home, launches **real Pi, OpenCode, Hermes, Claude Code or Codex**, and gives it a loopback
+provider endpoint in the client’s own wire format. That endpoint returns predetermined tool calls instead
 of running a model. The native client dispatches them through the installed MCP integration and
 sends the tool results back. The synthetic backend stores no memories.
 
@@ -11,12 +11,15 @@ npm ci
 node harness/run.mjs scripted-smoke --clients pi --install-clients
 node harness/run.mjs scripted-smoke --clients opencode --install-clients
 node harness/run.mjs scripted-smoke --clients hermes --install-clients
+# Claude Code and Codex must already be on PATH:
+node harness/run.mjs scripted-smoke --clients claude
+node harness/run.mjs scripted-smoke --clients codex
 # Reuse an installed Pi and select the report root:
 node harness/run.mjs scripted-smoke --root /tmp/midbrain-scripted-smoke
 ```
 
-Node 20+, npm and Git are needed. `--install-clients` installs the missing selected client in the
-run directory; set `MIDBRAIN_HARNESS_PI_VERSION` or
+Node 20+, npm and Git are needed. `--install-clients` installs missing Pi, OpenCode or Hermes in the
+run directory; Claude Code and Codex must already be installed. CI installs pinned versions into a temporary prefix. For run-local installers, set `MIDBRAIN_HARNESS_PI_VERSION` or
 `MIDBRAIN_HARNESS_OPENCODE_VERSION` or `MIDBRAIN_HARNESS_HERMES_VERSION` to pin its version. Hermes installation also needs `uv`. Existing binaries are reused with an isolated home. The mode does not load `.env`, copy
 login files or pass provider credentials. Only dummy and synthetic keys are used.
 Package/client downloads can use the network: this is not an OS network sandbox.
@@ -26,7 +29,7 @@ Package/client downloads can use the network: this is not an OS network sandbox.
 | Boundary | Required evidence |
 |---|---|
 | Installation | Real candidate installer succeeds; product adapter recognizes the selected client’s fresh integration; command points to the frozen package |
-| Discovery and provider context | All 12 tools appear in the client's actual outgoing provider request with the reviewed schemas |
+| Discovery and provider context | All 12 raw MCP schemas match the independent contract baseline; the outgoing provider catalog matches the client-specific schema projection |
 | Dispatch | Scripted tool name, arguments and call ID match native client events and the MCP recorder |
 | Result delivery | The actual MCP response matches the native result and appears in the correlated tool-result message sent back to the provider |
 | HTTP contract | Synthetic backend observes expected paths, query parameters, account bodies and credential scope |
@@ -36,7 +39,7 @@ Package/client downloads can use the network: this is not an OS network sandbox.
 
 All 12 tools run once on their positive path. `memory_search` additionally runs
 the outage and recovery pair: **14 tool calls and 15 local completion requests** in
-one native Pi or Hermes session. OpenCode adds a fifteenth call to an independent peer MCP
+one native Pi, Hermes, Claude Code or Codex session. OpenCode adds a fifteenth call to an independent peer MCP
 server, bringing its total to **15 tool calls and 16 local completion requests**.
 The provider does not advance on missing/mismatched schemas,
 call IDs or result content. Positive calls cannot pass with error envelopes.
@@ -48,16 +51,16 @@ then requires a successful retry on the same MCP connection.
 
 ## Limits and failure handling
 
-- Pi, OpenCode and Hermes are supported, **one client per run** (default: Pi). Other
+- Pi, OpenCode, Hermes, Claude Code and Codex are supported, **one client per run** (default: Pi). Other
   clients, combined client selections and unsupported flags are
   rejected before preparation. There is no silent substitute for native execution.
 - A missing selected client or an unsupported host is BLOCKED. Use `--install-clients` for a
-  run-local installation. Pi and Hermes drivers support macOS/Linux; the OpenCode driver also allows Windows,
+  run-local Pi/OpenCode/Hermes installation; install Claude Code or Codex on PATH. Pi and Hermes drivers support macOS/Linux; the other three drivers also allow Windows,
   but native Windows validation has not been recorded.
 - The native session has a 90-second deadline, plus process cleanup time. The MCP
-  recorder permits at most 14 calls for Pi/Hermes or 15 for OpenCode, shared
+  recorder permits at most 14 calls for Pi/Hermes/Claude/Codex or 15 for OpenCode, shared
   across all instrumented MCP processes and reconnects. The provider accepts at
-  most 15 completion requests for Pi/Hermes or 16 for OpenCode, with a 4 MiB request-body limit. Hermes additionally permits up to 16 local capability-discovery GETs. They are logged and counted separately from completion requests; unexpected completion requests fail the run.
+  most 15 completion requests for Pi/Hermes/Claude/Codex or 16 for OpenCode, with a 4 MiB request-body limit. Hermes additionally permits up to 16 local capability-discovery GETs. Claude permits up to four HEAD `/api/hello` startup probes. These reads are logged and counted separately from completion requests; unexpected completion requests fail the run.
 - The local provider never falls back to a real model. A protocol error stops the
   script; any native retry is rejected rather than advancing the test.
 - Missing, mismatched, interrupted or failed evidence exits nonzero. Ctrl+C stops
@@ -83,7 +86,7 @@ Under `evidence/<client>/scripted-smoke/`:
 - `receipt.json`: script, native events, MCP trace, provider requests and HTTP receipts.
 - `provider-events.ndjson`: incrementally recorded provider requests, receipts and errors.
 - `native.ndjson`: native client output.
-- `native-session.jsonl`: Hermes’s native session export, correlated to the exact test prompt; result trust wrappers are retained in raw evidence.
+- `native-session.jsonl`: Hermes’s native session export or Codex’s native rollout. Hermes is correlated to the exact test prompt. Codex session identity, MCP completions, arguments, results and status must agree with CLI events; the rollout supplies real provider call IDs. Native wrappers are retained.
 - `mcp-events/*.ndjson`: MCP discovery, attempted calls and results.
 - `peer-events.ndjson`: OpenCode’s independent peer-server request/result receipt.
 
@@ -96,7 +99,7 @@ to regenerate presentation files without rerunning the native test.
 | Mode | Native evidence | LLM inference | Scope |
 |---|---|---|---|
 | `dry-smoke` | Connection/discovery across five clients, direct harness-driven MCP calls | None | All-tool contracts and failure handling |
-| `scripted-smoke` | Actual Pi/OpenCode/Hermes tool-dispatch and result-return loop | None | All-tool native routing, provider context, outage/recovery |
+| `scripted-smoke` | Actual Pi/OpenCode/Hermes/Claude/Codex tool-dispatch and result-return loop | None | All-tool native routing, provider context, outage/recovery |
 | `live-smoke` | Real model and native client tool use | Small, explicit run | Search invocation, result consumption, outage/recovery |
 | Behavioral `run` | Real model, capture hooks and memory API | Yes | Storage, recall and cross-client behavior |
 
@@ -111,13 +114,42 @@ These macOS arm64 runs used the packaged candidate and installed native clients,
 
 | Client | Run | Assertions | MCP calls | Local provider traffic |
 |---|---|---:|---:|---|
-| Pi 0.87.1 | `20260923-062419-446a` | 25/25 | 14 | 15 completion requests |
-| OpenCode 1.18.32 | `20260923-062423-ddfd` | 28/28 | 15 | 16 completion requests |
-| Hermes 0.19.0 | `20260923-062426-eac1` | 25/25 | 14 | 15 completion requests + 10 capability GETs |
+| Pi 0.87.1 | `20260923-073232-ef84` | 26/26 | 14 | 15 completion requests |
+| OpenCode 1.18.32 | `20260923-073230-8276` | 29/29 | 15 | 16 completion requests |
+| Hermes 0.19.0 | `20260923-073231-6cca` | 26/26 | 14 | 15 completion requests + 10 capability GETs |
+| Claude Code 2.1.280 | `20260923-073232-875d` | 26/26 | 14 | 15 completion requests + 1 startup HEAD |
+| Codex 0.150.1 | `20260923-073231-c802` | 26/26 | 14 | 15 completion requests |
 
-The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes × Linux/macOS on relevant pushes and pull requests, or manual dispatch. [Remote CI passed all eight Linux/macOS native jobs](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`, including scripted Pi, OpenCode and Hermes on each host. Native Windows execution remains unvalidated.
+The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes/Claude/Codex × Linux/macOS on relevant pushes and pull requests, or manual dispatch. [Remote CI passed all eight Linux/macOS native jobs](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`, including scripted Pi, OpenCode and Hermes on each host. The new Claude/Codex jobs await their first remote validation. Native Windows execution remains unvalidated.
 
-Hermes uses its custom-provider setting with a loopback URL, automatic compression disabled and the full tool catalog enabled (`tool_search: off`). Its native session export proves dispatch independently of provider receipts. This does not test Hermes deferred tool discovery. Pi and Hermes do not yet run OpenCode’s second-server collision scenario.
+Hermes uses its custom-provider setting with a loopback URL, automatic compression disabled and the full tool catalog enabled (`tool_search: off`). Its native session export proves dispatch independently of provider receipts. This does not test Hermes deferred tool discovery. Only OpenCode currently runs the second-server collision scenario.
+
+## Claude Code and Codex provider adapters
+
+Claude Code uses an Anthropic Messages endpoint on loopback, with automatic
+compaction and tool search disabled. The script emits `tool_use` blocks, and
+Claude’s actual `tool_result` blocks must return with the same IDs. Only the
+MidBrain tools are pre-approved for this isolated run; built-in tools remain
+visible in the provider catalog. This does not validate interactive approval or
+deferred discovery.
+
+Codex uses a custom Responses provider with no OpenAI authentication and no
+provider retries. It receives a namespaced function call and executes it through
+its real MCP client. The native rollout’s `McpToolCall` completion supplies the
+provider call ID; CLI events independently confirm the server, arguments, result
+and status. Missing or inconsistent session evidence cannot pass.
+
+Codex’s provider-facing schema omits `minimum`, `maximum` and `default` fields.
+The test checks names, types, required arguments and enums in that projection,
+while separately requiring every original constraint at the raw MCP boundary.
+The report retains both forms rather than claiming the provider saw constraints
+that Codex removed. Codex runs with approval and hook-trust bypasses inside the
+throwaway home; this validates dispatch, not its interactive trust flow.
+
+These adapters implement only the protocol messages needed by this bounded
+script. They are not general-purpose mock provider implementations. All five
+adapters select tools deterministically; none proves that a real model chooses
+them correctly.
 
 ## Same-name MCP coexistence
 
@@ -145,7 +177,7 @@ with `node harness/run.mjs verify-review <bundle-directory>`. A valid bundle can
 contain failed or incomplete tests; integrity is separate from test success.
 See [review export and verification](mcp-review-bundles.md).
 
-Current reports include `assertionSchemaVersion: 1`. The gate requires every
+Current reports include `assertionSchemaVersion: 2`, which adds a separate raw MCP schema assertion. Version 1 reports retain their original inventory. The gate requires every
 expected assertion ID exactly once in its correct coverage row, with a boolean
 passing result. Missing, duplicate or unknown assertions cannot produce PASS.
 Older saved reports retain their original evidence rules; they do not gain checks

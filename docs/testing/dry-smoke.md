@@ -217,7 +217,7 @@ tool definitions from initial discovery and restart. All context previews were
 complete, with no native model request created or sent.
 
 For native dispatch without LLM inference, run [scripted-smoke](scripted-smoke.md).
-Its Pi, OpenCode and Hermes adapters route all 12 tool calls through the real CLI and capture actual
+Its Pi, OpenCode, Hermes, Claude Code and Codex adapters route all 12 tool calls through the real CLI and capture actual
 requests sent back to the local scripted provider. This is separate evidence from
 dry-smoke's context preview and from real-model live-smoke.
 

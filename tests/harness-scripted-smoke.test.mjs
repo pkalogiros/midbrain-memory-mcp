@@ -7,11 +7,20 @@ const catalog = TOOL_CONTRACTS.map(t => ({ type: 'function', function: { name: `
 const post = (server, body) => fetch(`${server.url}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'mcp-script', tools: catalog, messages: [], ...body }) });
 
 describe('scripted native provider', () => {
+  it('records and caps Claude startup probes without consuming a completion', async () => {
+    const server = await startScriptedProvider([], () => {}, 'claude');
+    try {
+      for (let i = 0; i < 4; i++) expect((await fetch(`${server.url.replace(/\/v1$/, '')}/api/hello`, { method: 'HEAD' })).status).toBe(200);
+      expect(server.requests).toHaveLength(0); expect(server.complete).toBe(false);
+      expect((await fetch(`${server.url.replace(/\/v1$/, '')}/api/hello`, { method: 'HEAD' })).status).toBe(400);
+      expect(server.issues).toHaveLength(1);
+    } finally { await server.close(); }
+  });
   it('plans every tool and a bounded error/recovery pair without model credentials', () => {
     const plan = scriptedPlan('/throwaway/project');
     expect(new Set(plan.map(s => s.name))).toEqual(new Set(TOOL_CONTRACTS.map(s => s.name)));
     expect(plan).toHaveLength(14);
-    expect(() => validateScriptedFlags({ clients: 'claude' })).toThrow(/Pi/);
+    expect(() => validateScriptedFlags({ clients: 'unknown' })).toThrow(/client/i);
     expect(() => validateScriptedFlags({ model: 'paid' })).toThrow(/model/);
   });
   it('requires exact tool result correlation and content before advancing', async () => {
@@ -85,7 +94,7 @@ function evidence() {
   const plan = scriptedPlan('/project');
   const calls = plan.map((step, i) => ({ name: step.name, args: step.args, result: { ...(i === 12 ? { isError: true } : {}), content: [{ type: 'text', text: step.contains }] }, status: 'returned', connection: 42, startedAt: new Date(i * 10).toISOString(), completedAt: new Date(i * 10 + 5).toISOString() }));
   const http = (method, path, query = {}, body = null, key = 'global', status = 200) => ({ method, path: `/api/v1${path}`, query, body, key, status });
-  return { plan, trace: { calls, issues: [] }, turn: { exitCode: 0, finalText: 'SCRIPTED_MCP_COMPLETE', toolCalls: calls.map((c, i) => ({ id: `script-call-${i + 1}`, name: `midbrain_${c.name}`, input: c.args, result: c.result, ok: i !== 12 })) }, provider: { complete: true, issues: [], receipts: calls.map((c, i) => ({ id: `script-call-${i + 1}`, content: c.result.content[0].text })) }, unexpected: [], requests: [
+  return { plan, trace: { calls, issues: [], discoveries: [{ connection: 42, tools: TOOL_CONTRACTS.map(t => ({ name: t.name, inputSchema: { type: 'object', properties: t.properties, required: t.required } })) }] }, turn: { exitCode: 0, finalText: 'SCRIPTED_MCP_COMPLETE', toolCalls: calls.map((c, i) => ({ id: `script-call-${i + 1}`, name: `midbrain_${c.name}`, input: c.args, result: c.result, ok: i !== 12 })) }, provider: { complete: true, issues: [], receipts: calls.map((c, i) => ({ id: `script-call-${i + 1}`, content: c.result.content[0].text })) }, unexpected: [], requests: [
     http('GET', '/memories/search/semantic', { query: 'DRY_SMOKE_SCRIPTED', limit: '9' }),
     http('GET', '/memories/search/lexical', { pattern: 'fixture.*', limit: '2' }),
     http('GET', '/memories/episodic', { start_date: '2026-01-01T00:00:00.000Z', end_date: '2026-01-03T00:00:00.000Z' }),
@@ -103,6 +112,7 @@ describe('scripted evidence gate', () => {
     ['provider correlation', e => { e.provider.receipts[0].id = 'wrong'; }],
     ['provider content', e => { e.provider.receipts[0].content = 'invented'; }],
     ['MCP result', e => { e.trace.calls[0].result = { content: [{ type: 'text', text: 'wrong' }] }; }],
+    ['MCP schema drift', e => { e.trace.discoveries[0].tools = []; }],
     ['MCP trace integrity', e => { e.trace.issues.push('orphan event'); }],
     ['missing error envelope', e => { delete e.trace.calls[12].result.isError; }],
     ['native success for failed MCP call', e => { e.turn.toolCalls[12].ok = true; }],
@@ -123,9 +133,9 @@ describe('scripted evidence gate', () => {
     report.cells.pop(); expect(scriptedOutcome(report)).toBe('BLOCKED');
     report.isolation.ok = false; expect(scriptedOutcome(report)).toBe('FAIL');
   });
-  it('requires every uniquely identified assertion in current reports', () => {
-    const inventory = scriptedCheckInventory('pi');
-    const report = { assertionSchemaVersion: 1, run: { complete: true }, isolation: { ok: true }, clients: [{ id: 'pi' }], cells: SCRIPTED_ROWS.map(row => ({ row, client: 'pi', status: 'PASS', checks: inventory.filter(c => c.row === row).map(c => ({ ...c, ok: true })) })) };
+  it.each([1, 2])('requires every uniquely identified assertion in version %s reports', version => {
+    const inventory = scriptedCheckInventory('pi', version);
+    const report = { assertionSchemaVersion: version, run: { complete: true }, isolation: { ok: true }, clients: [{ id: 'pi' }], cells: SCRIPTED_ROWS.map(row => ({ row, client: 'pi', status: 'PASS', checks: inventory.filter(c => c.row === row).map(c => ({ ...c, ok: true })) })) };
     expect(scriptedOutcome(report)).toBe('PASS');
     for (const corrupt of [
       r => r.cells[0].checks.pop(),

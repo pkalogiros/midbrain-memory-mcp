@@ -479,8 +479,8 @@ function help() {
   console.log(`midbrain multi-client harness v${HARNESS_VERSION}
 
 commands
-  scripted-smoke [--clients pi|opencode] [--root DIR] [--install-clients]
-    Real Pi, OpenCode or Hermes tool round trips with a local scripted provider. Zero LLM inference.
+  scripted-smoke [--clients pi|opencode|hermes|claude|codex] [--root DIR] [--install-clients]
+    Real Pi, OpenCode, Hermes, Claude Code or Codex tool round trips with a local scripted provider. Zero LLM inference.
   live-smoke --config FILE [--clients a,b] [--execute] [--root DIR] [--install-clients]
            plan by default; --execute runs two bounded real-model tool scenarios against a local fixture
   dry-smoke [--clients a,b] [--root DIR] [--install-clients]

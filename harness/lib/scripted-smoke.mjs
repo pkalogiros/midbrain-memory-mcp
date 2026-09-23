@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync } fr
 import { createRunContext, defaultRoot, HARNESS_VERSION } from './context.mjs';
 import { freezeCandidate, assertCandidate } from './candidate.mjs';
 import { seedDetectionFixtures, writeGlobalKey, writeGlobalHostConfig, initProject, installCandidate, inspectInstall } from './home.mjs';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { parse as jsonc } from 'jsonc-parser';
 import { scriptedClient, scriptedClientConfig, scriptedArgs, scriptedNativeEvent, scriptedNativeEnv, collectScriptedNative } from './scripted-smoke-clients.mjs';
@@ -27,7 +28,7 @@ export async function runScriptedSmoke(flags) {
   const client = scriptedClient(flags.clients || 'pi');
   const ctx = createRunContext({ root: flags.root ? path.resolve(flags.root) : defaultRoot(), options: { drySmoke: true } });
   const before = snapshot();
-  const report = { schemaVersion: 1, assertionSchemaVersion: 1, harnessVersion: HARNESS_VERSION, run: { kind: 'scripted-smoke', scope: SCRIPTED_SCOPE, runId: ctx.runId, runDir: ctx.dirs.run, startedAt: ctx.startedAt, platform: ctx.platform, arch: ctx.arch, node: ctx.node, complete: false, llmCalls: 0, localProviderRequests: 0, toolCallCap: scriptedPlan('', client.id).length, timeoutMs: 90000 }, candidate: {}, clients: [{ id: client.id, displayName: client.displayName, version: null }], cells: [], scriptedEvidence: null, isolation: { ok: false, drift: [] } };
+  const report = { schemaVersion: 1, assertionSchemaVersion: 2, harnessVersion: HARNESS_VERSION, run: { kind: 'scripted-smoke', scope: SCRIPTED_SCOPE, runId: ctx.runId, runDir: ctx.dirs.run, startedAt: ctx.startedAt, platform: ctx.platform, arch: ctx.arch, node: ctx.node, complete: false, llmCalls: 0, localProviderRequests: 0, toolCallCap: scriptedPlan('', client.id).length, timeoutMs: 90000 }, candidate: {}, clients: [{ id: client.id, displayName: client.displayName, version: null }], cells: [], scriptedEvidence: null, isolation: { ok: false, drift: [] } };
   let api; let provider; let restore; let interrupted = false; let closing;
   const save = () => {
     const safe = JSON.parse(redactSmoke(report));
@@ -58,7 +59,7 @@ export async function runScriptedSmoke(flags) {
     const project = await initProject(ctx, `scripted-${client.id}`);
     const evidenceDir = ctx.evidenceDir(client.id, 'scripted-smoke'); const traceDir = path.join(evidenceDir, 'mcp-events'); mkdirSync(traceDir);
     const peerLog = path.join(evidenceDir, 'peer-events.ndjson');
-    const configFile = path.join(ctx.dirs.home, client.id === 'pi' ? '.pi/agent/models.json' : client.id === 'hermes' ? '.hermes/config.yaml' : '.config/opencode/opencode.jsonc');
+    const configFile = path.join(ctx.dirs.home, client.id === 'pi' ? '.pi/agent/models.json' : client.id === 'hermes' ? '.hermes/config.yaml' : client.id === 'claude' ? '.claude/settings.json' : client.id === 'codex' ? '.codex/config.toml' : '.config/opencode/opencode.jsonc');
     let peerEntry;
     if (client.id === 'opencode') {
       const initial = jsonc(readFileSync(configFile, 'utf8'));
@@ -74,7 +75,7 @@ export async function runScriptedSmoke(flags) {
     report.cells.push(cell({ row: 'Installation', scenario: 'scripted-smoke', client, checks }));
     if (!checks.every(c => c.ok)) throw new Error(`${client.displayName} installation failed; inspect installer evidence`);
     const plan = scriptedPlan(project, client.id); provider = await startScriptedProvider(plan, event => appendFileSync(path.join(evidenceDir, 'provider-events.ndjson'), `${JSON.stringify(JSON.parse(redactSmoke(event)))}\n`, { mode: 0o600 }), client.id);
-    const currentConfig = client.id === 'opencode' ? jsonc(readFileSync(configFile, 'utf8')) : client.id === 'hermes' ? parseYaml(readFileSync(configFile, 'utf8')) : {};
+    const currentConfig = client.id === 'opencode' ? jsonc(readFileSync(configFile, 'utf8')) : client.id === 'hermes' ? parseYaml(readFileSync(configFile, 'utf8')) : client.id === 'codex' ? parseToml(readFileSync(configFile, 'utf8')) : client.id === 'claude' ? JSON.parse(readFileSync(configFile, 'utf8')) : {};
     if (peerEntry) {
       const preserved = JSON.stringify(currentConfig.mcp?.['scripted-peer']) === JSON.stringify(peerEntry);
       report.cells[0].checks.push(identifiedCheck('peer-preserved', 'Installer preserves the independent same-name MCP server', preserved));
@@ -85,6 +86,7 @@ export async function runScriptedSmoke(flags) {
     }
     const configured = scriptedClientConfig(client.id, provider.url, currentConfig);
     if (client.id === 'hermes') writeFileSync(configFile, stringifyYaml(configured));
+    else if (client.id === 'codex') writeFileSync(configFile, stringifyToml(configured));
     else ctx.writeJson(configFile, configured);
     const spec = path.join(evidenceDir, 'proxy.json'); ctx.writeJson(spec, { entry, traceDir, maxMcpCalls: plan.length, allowedTools: SMOKE_TOOLS });
     restore = instrumentSmokeEntry(ctx, client.id, process.execPath, [proxy, spec]);

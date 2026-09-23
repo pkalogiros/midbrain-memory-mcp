@@ -112,6 +112,8 @@ jobs:
           - pi
           - opencode
           - hermes
+          - claude
+          - codex
     env:
       MIDBRAIN_HARNESS_PI_VERSION: 0.87.1
       MIDBRAIN_HARNESS_OPENCODE_VERSION: 1.18.32
@@ -131,6 +133,16 @@ jobs:
       - run: python -m pip install uv
         if: matrix.client == 'hermes'
       - run: npm ci
+      - name: Install Claude Code
+        if: matrix.client == 'claude'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/scripted-clients" --no-audit --no-fund --no-save @anthropic-ai/claude-code@2.1.280
+          echo "$RUNNER_TEMP/scripted-clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install Codex
+        if: matrix.client == 'codex'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/scripted-clients" --no-audit --no-fund --no-save @openai/codex@0.150.1
+          echo "$RUNNER_TEMP/scripted-clients/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Native client with local scripted provider and synthetic backend
         run: node harness/run.mjs scripted-smoke --clients ${{ matrix.client }} --install-clients --root "$RUNNER_TEMP/midbrain-scripted-smoke"
       - name: Preserve reports and redacted synthetic evidence
