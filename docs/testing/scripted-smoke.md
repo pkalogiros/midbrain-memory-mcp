@@ -115,7 +115,7 @@ These macOS arm64 runs used the packaged candidate and installed native clients,
 | OpenCode 1.18.32 | `20260923-062423-ddfd` | 28/28 | 15 | 16 completion requests |
 | Hermes 0.19.0 | `20260923-062426-eac1` | 25/25 | 14 | 15 completion requests + 10 capability GETs |
 
-The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes × Linux/macOS on relevant pushes and pull requests, or manual dispatch. Remote CI execution is still pending; configuration and local macOS results do not establish a Linux or Windows pass.
+The `MCP integration (no models)` workflow is configured for Pi/OpenCode/Hermes × Linux/macOS on relevant pushes and pull requests, or manual dispatch. [Remote CI passed all eight Linux/macOS native jobs](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`, including scripted Pi, OpenCode and Hermes on each host. Native Windows execution remains unvalidated.
 
 Hermes uses its custom-provider setting with a loopback URL, automatic compression disabled and the full tool catalog enabled (`tool_search: off`). Its native session export proves dispatch independently of provider receipts. This does not test Hermes deferred tool discovery. Pi and Hermes do not yet run OpenCode’s second-server collision scenario.
 

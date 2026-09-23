@@ -50,3 +50,8 @@ exporter does not convert those outcomes to PASS. Verification does not rerun th
 tests, authenticate the author, certify a release or establish other-OS coverage.
 Checksums detect changes relative to the manifest; use a trusted channel when
 obtaining the bundle and its manifest.
+
+The exporter verifies a staging directory, reserves a new destination exclusively,
+and moves its contents with the manifest last. This supports Windows directory
+semantics and leaves interrupted publication unverifiable. Existing destinations
+are refused; a caught publication failure removes only the newly reserved output.

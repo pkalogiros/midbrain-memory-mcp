@@ -210,8 +210,7 @@ real capture and recall. A green dry-smoke report is not a full release sign-off
 Run `20260923-061035-0d5d` passed all 55 client/coverage combinations (380 individual assertions)
 on macOS arm64 with zero model prompts and no real-home drift. Native versions:
 OpenCode 1.18.32, Claude Code 2.1.280, Codex 0.150.1, Hermes 0.19.0 and Pi 0.87.1.
-The run reused installed client binaries. Linux/macOS workflow jobs are configured;
-this local result does not claim a remote CI or native Windows pass.
+The local run reused installed client binaries. [Remote native CI also passed](https://github.com/pkalogiros/midbrain-memory-mcp/actions/runs/35867643216) for commit `15f93a4`: dry-smoke recorded 380/380 assertions on Linux x64 (`20260923-133147-6a22`) and macOS arm64 (`20260923-133158-dee2`). Native Windows execution remains unvalidated.
 
 This validation also recorded 66 MCP call attempts per client (330 total), with
 tool definitions from initial discovery and restart. All context previews were
