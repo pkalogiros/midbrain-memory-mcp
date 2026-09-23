@@ -1,5 +1,9 @@
 # Multi-client behavioral harness
 
+For a short explanation of **dry-smoke, scripted-smoke and live-smoke**, including
+commands and illustrative costs, open the [standalone smoke guide](../docs/testing/mcp-smoke-guide.html)
+directly in a browser—no web server required—or read its [Markdown version](../docs/testing/mcp-smoke-guide.md).
+
 **For MCP integration testing, start here** from the repository root after `npm ci`:
 
 ```bash
